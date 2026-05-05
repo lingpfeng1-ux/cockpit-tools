@@ -9,7 +9,6 @@ use modules::logger;
 use std::sync::OnceLock;
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
-#[cfg(target_os = "macos")]
 use tauri::RunEvent;
 use tauri::WindowEvent;
 use tauri::{Emitter, Manager};
@@ -268,10 +267,19 @@ pub fn run() {
                 match config.close_behavior {
                     CloseWindowBehavior::Minimize => {
                         api.prevent_close();
-                        let _ = window.hide();
-                        info!("[Window] 窗口已最小化到托盘");
+                        if let Err(err) =
+                            modules::floating_card_window::destroy_main_window_to_tray(window)
+                        {
+                            logger::log_warn(&format!(
+                                "[Window] 销毁主窗口 WebView 失败，回退为隐藏窗口: {}",
+                                err
+                            ));
+                            let _ = window.hide();
+                        }
+                        info!("[Window] 窗口已关闭到托盘");
                     }
                     CloseWindowBehavior::Quit => {
+                        modules::floating_card_window::request_app_exit();
                         info!("[Window] 用户选择退出应用");
                     }
                     CloseWindowBehavior::Ask => {
@@ -372,6 +380,7 @@ pub fn run() {
             commands::system::detect_app_path,
             commands::system::set_wakeup_override,
             commands::system::handle_window_close,
+            commands::system::main_window_take_pending_navigation,
             commands::system::show_floating_card_window,
             commands::system::show_instance_floating_card_window,
             commands::system::get_floating_card_context,
@@ -819,6 +828,13 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
+        if let RunEvent::ExitRequested { api, .. } = &event {
+            if modules::floating_card_window::should_keep_alive_after_main_window_destroyed() {
+                api.prevent_exit();
+                logger::log_info("[Window] 主窗口已销毁，应用继续在托盘运行");
+            }
+        }
+
         #[cfg(target_os = "macos")]
         {
             match event {
