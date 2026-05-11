@@ -1468,7 +1468,10 @@ pub fn delete_instance(instance_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn update_instance_after_start(instance_id: &str, pid: u32) -> Result<InstanceProfile, String> {
+pub fn update_instance_after_start_resolved(
+    instance_id: &str,
+    pid: Option<u32>,
+) -> Result<InstanceProfile, String> {
     let _lock = CODEX_INSTANCE_STORE_LOCK
         .lock()
         .map_err(|_| "无法获取实例锁")?;
@@ -1477,7 +1480,7 @@ pub fn update_instance_after_start(instance_id: &str, pid: u32) -> Result<Instan
     for instance in &mut store.instances {
         if instance.id == instance_id {
             instance.last_launched_at = Some(Utc::now().timestamp_millis());
-            instance.last_pid = Some(pid);
+            instance.last_pid = pid;
             updated = Some(instance.clone());
             break;
         }

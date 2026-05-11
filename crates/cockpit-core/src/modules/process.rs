@@ -3606,7 +3606,7 @@ fn resolve_expected_workbuddy_launch_path_for_match() -> Option<String> {
     Some(normalized)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn resolve_expected_codex_launch_path_for_match() -> Option<String> {
     let launch_path = match resolve_codex_launch_path() {
         Ok(path) => path,
@@ -6492,12 +6492,105 @@ fn is_codex_app_server_process(entry: &WindowsCodexProcessProbeEntry) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn parse_codex_windows_process_probe_output(stdout: &str) -> Vec<(u32, Option<String>)> {
+fn extract_windows_exe_path_from_command_line(command_line: &str) -> Option<String> {
+    let trimmed = command_line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        if let Some(end) = rest.find('"') {
+            let value = rest[..end].trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if let Some(exe_end) = lower.find(".exe") {
+        let value = trimmed[..exe_end + ".exe".len()].trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+
+    split_command_tokens(trimmed).into_iter().next()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_probe_entry_exe_matches_expected(
+    entry: &WindowsCodexProcessProbeEntry,
+    expected_exe_path: Option<&str>,
+) -> bool {
+    let Some(expected_exe_path) = expected_exe_path else {
+        return true;
+    };
+    let expected = normalize_path_for_compare(expected_exe_path);
+    if expected.is_empty() {
+        return false;
+    }
+
+    let actual = normalize_path_for_compare(&entry.exe_path);
+    if !actual.is_empty() && actual == expected {
+        return true;
+    }
+
+    extract_windows_exe_path_from_command_line(&entry.command_line)
+        .map(|value| normalize_path_for_compare(&value))
+        .filter(|value| !value.is_empty())
+        .as_deref()
+        == Some(expected.as_str())
+}
+
+#[cfg(target_os = "windows")]
+fn extract_codex_electron_user_data_dir_from_command_line(command_line: &str) -> Option<String> {
+    if let Some(dir) = extract_user_data_dir_from_command_line(command_line) {
+        return Some(dir);
+    }
+
+    let key = "CODEX_ELECTRON_USER_DATA_PATH";
+    let prefix = format!("{}=", key);
+    let tokens = split_command_tokens(command_line);
+    for (index, token) in tokens.iter().enumerate() {
+        let Some(rest) = token.strip_prefix(&prefix) else {
+            continue;
+        };
+
+        let mut parts = Vec::new();
+        if !rest.trim().is_empty() {
+            parts.push(rest.to_string());
+        }
+        let mut next = index + 1;
+        while next < tokens.len() {
+            let part = tokens[next].as_str();
+            if part.starts_with("--") || is_env_token(part) {
+                break;
+            }
+            parts.push(part.to_string());
+            next += 1;
+        }
+
+        let joined = parts.join(" ");
+        let trimmed = joined.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn parse_codex_windows_process_probe_output_inner(
+    stdout: &str,
+    expected_exe_path: Option<&str>,
+) -> Vec<(u32, Option<String>)> {
     let raw_entries: Vec<WindowsCodexProcessProbeEntry> = stdout
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .filter_map(parse_windows_codex_process_probe_entry)
+        .filter(|entry| windows_probe_entry_exe_matches_expected(entry, expected_exe_path))
         .collect();
 
     let mut child_user_data_dirs: HashMap<u32, String> = HashMap::new();
@@ -6506,7 +6599,9 @@ fn parse_codex_windows_process_probe_output(stdout: &str) -> Vec<(u32, Option<St
         if !is_helper_command_line(&lower) && !lower.contains("crashpad_handler") {
             continue;
         }
-        if let Some(dir) = extract_user_data_dir_from_command_line(&entry.command_line) {
+        if let Some(dir) =
+            extract_codex_electron_user_data_dir_from_command_line(&entry.command_line)
+        {
             let normalized = normalize_path_for_compare(&dir);
             if !normalized.is_empty() {
                 child_user_data_dirs.insert(entry.parent_pid, dir);
@@ -6523,7 +6618,7 @@ fn parse_codex_windows_process_probe_output(stdout: &str) -> Vec<(u32, Option<St
         {
             continue;
         }
-        let dir = extract_user_data_dir_from_command_line(&entry.command_line)
+        let dir = extract_codex_electron_user_data_dir_from_command_line(&entry.command_line)
             .or_else(|| child_user_data_dirs.get(&entry.pid).cloned());
         entries.push((entry.pid, dir));
     }
@@ -6534,7 +6629,17 @@ fn parse_codex_windows_process_probe_output(stdout: &str) -> Vec<(u32, Option<St
 }
 
 #[cfg(target_os = "windows")]
-fn collect_codex_process_entries_from_powershell() -> Vec<(u32, Option<String>)> {
+fn parse_codex_windows_process_probe_output_with_expected(
+    stdout: &str,
+    expected_exe_path: &str,
+) -> Vec<(u32, Option<String>)> {
+    parse_codex_windows_process_probe_output_inner(stdout, Some(expected_exe_path))
+}
+
+#[cfg(target_os = "windows")]
+fn collect_codex_process_entries_from_powershell(
+    expected_exe_path: &str,
+) -> Vec<(u32, Option<String>)> {
     let script = r#"Get-CimInstance Win32_Process -Filter "Name='Codex.exe'" -ErrorAction SilentlyContinue |
   ForEach-Object { "$($_.ProcessId)|$($_.ParentProcessId)|$($_.ExecutablePath)|$($_.CommandLine)" }"#;
 
@@ -6547,12 +6652,24 @@ fn collect_codex_process_entries_from_powershell() -> Vec<(u32, Option<String>)>
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_codex_windows_process_probe_output(&stdout)
+    parse_codex_windows_process_probe_output_with_expected(&stdout, expected_exe_path)
 }
 
 #[cfg(target_os = "windows")]
-fn collect_codex_process_entries_from_sysinfo_fallback() -> Vec<(u32, Option<String>)> {
+fn collect_codex_process_entries_from_sysinfo_fallback(
+    expected_exe_path: &str,
+) -> Vec<(u32, Option<String>)> {
+    let expected = normalize_path_for_compare(expected_exe_path);
+    if expected.is_empty() {
+        return Vec::new();
+    }
+
     let mut entries: Vec<(u32, Option<String>)> = Vec::new();
+    let mut candidates = 0usize;
+    let mut path_mismatch = 0usize;
+    let mut missing_exe = 0usize;
+    let mut cmdline_fallback_hit = 0usize;
+
     let mut system = System::new();
     system.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
@@ -6577,6 +6694,7 @@ fn collect_codex_process_entries_from_sysinfo_fallback() -> Vec<(u32, Option<Str
         if name != "codex.exe" && !exe_path.ends_with("\\codex.exe") {
             continue;
         }
+        candidates += 1;
 
         let args_line = process
             .cmd()
@@ -6592,21 +6710,72 @@ fn collect_codex_process_entries_from_sysinfo_fallback() -> Vec<(u32, Option<Str
             continue;
         }
 
-        let dir = extract_user_data_dir(process.cmd());
+        let (actual, used_cmdline_fallback) = resolve_windows_process_exe_for_match(process);
+        match actual {
+            Some(actual_path) if actual_path == expected => {
+                if used_cmdline_fallback {
+                    cmdline_fallback_hit += 1;
+                }
+            }
+            Some(_) => {
+                path_mismatch += 1;
+                continue;
+            }
+            None => {
+                missing_exe += 1;
+                continue;
+            }
+        }
+
+        let args_original = process
+            .cmd()
+            .iter()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<String>>()
+            .join(" ");
+        let dir = extract_user_data_dir(process.cmd())
+            .or_else(|| extract_codex_electron_user_data_dir_from_command_line(&args_original));
         entries.push((pid_u32, dir));
     }
     entries.sort_by_key(|(pid, _)| *pid);
     entries.dedup_by(|a, b| a.0 == b.0);
+
+    if entries.is_empty() {
+        crate::modules::logger::log_warn(&format!(
+            "[Codex Probe] sysinfo fallback no match: expected={}, candidates={}, path_mismatch={}, missing_exe={}, cmdline_fallback_hit={}",
+            expected, candidates, path_mismatch, missing_exe, cmdline_fallback_hit
+        ));
+    } else {
+        crate::modules::logger::log_info(&format!(
+            "[Codex Probe] sysinfo fallback matched: expected={}, matched={}, candidates={}, path_mismatch={}, missing_exe={}, cmdline_fallback_hit={}",
+            expected, entries.len(), candidates, path_mismatch, missing_exe, cmdline_fallback_hit
+        ));
+    }
+
     entries
 }
 
 #[cfg(target_os = "windows")]
 pub fn collect_codex_process_entries() -> Vec<(u32, Option<String>)> {
-    let entries = collect_codex_process_entries_from_powershell();
+    let expected_launch = resolve_expected_codex_launch_path_for_match();
+    let Some(expected) = expected_launch.as_deref() else {
+        return Vec::new();
+    };
+
+    let entries = collect_codex_process_entries_from_powershell(expected);
     if !entries.is_empty() {
         return entries;
     }
-    collect_codex_process_entries_from_sysinfo_fallback()
+    if strict_process_detect_enabled() {
+        crate::modules::logger::log_warn(
+            "[Codex Probe] strict mode enabled and PowerShell returned empty; skip sysinfo fallback",
+        );
+        return Vec::new();
+    }
+    crate::modules::logger::log_warn(
+        "[Codex Probe] PowerShell returned empty; fallback to sysinfo probe",
+    );
+    collect_codex_process_entries_from_sysinfo_fallback(expected)
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -9137,7 +9306,10 @@ mod tests {
 200|0|C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe|"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe"
 201|200|C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe|"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe" --type=gpu-process --user-data-dir="C:\Profiles\Codex Two\electron-user-data""#;
 
-        let entries = parse_codex_windows_process_probe_output(probe_output);
+        let entries = parse_codex_windows_process_probe_output_with_expected(
+            probe_output,
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe",
+        );
 
         assert_eq!(
             entries,
@@ -9151,6 +9323,46 @@ mod tests {
                     Some("C:\\Profiles\\Codex Two\\electron-user-data".to_string())
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn codex_windows_probe_filters_unrelated_codex_executable_path() {
+        let probe_output = r#"100|0|C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe|"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe"
+101|100|C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe|"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe" --type=renderer --user-data-dir="C:\Profiles\Codex One\electron-user-data"
+300|0|D:\Tools\Codex.exe|"D:\Tools\Codex.exe"
+301|300|D:\Tools\Codex.exe|"D:\Tools\Codex.exe" --type=renderer --user-data-dir="C:\Profiles\Codex One\electron-user-data""#;
+
+        let entries = parse_codex_windows_process_probe_output_with_expected(
+            probe_output,
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe",
+        );
+
+        assert_eq!(
+            entries,
+            vec![(
+                100,
+                Some("C:\\Profiles\\Codex One\\electron-user-data".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn codex_windows_probe_maps_child_env_user_data_dir_to_parent() {
+        let probe_output = r#"100|0|C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe|"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe"
+101|100|C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe|"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe" --type=renderer CODEX_ELECTRON_USER_DATA_PATH="C:\Profiles\Codex Env\electron-user-data""#;
+
+        let entries = parse_codex_windows_process_probe_output_with_expected(
+            probe_output,
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_1\app\Codex.exe",
+        );
+
+        assert_eq!(
+            entries,
+            vec![(
+                100,
+                Some("C:\\Profiles\\Codex Env\\electron-user-data".to_string())
+            )]
         );
     }
 
@@ -9171,5 +9383,52 @@ mod tests {
             resolve_codex_pid_from_entries(None, Some("C:\\Profiles\\Codex Two"), &entries),
             Some(200)
         );
+    }
+
+    #[test]
+    fn codex_windows_pid_resolution_rejects_stale_last_pid() {
+        assert_eq!(
+            resolve_codex_pid_from_entries(Some(424_242), Some("C:\\Profiles\\Codex One"), &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_windows_pid_resolution_rejects_reused_pid_with_other_user_data_dir() {
+        let entries = vec![(
+            100,
+            Some("C:\\Profiles\\Other Codex\\electron-user-data".to_string()),
+        )];
+
+        assert_eq!(
+            resolve_codex_pid_from_entries(Some(100), Some("C:\\Profiles\\Codex One"), &entries),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_windows_default_closed_ignores_stale_last_pid() {
+        assert_eq!(
+            resolve_codex_pid_from_entries(Some(424_242), None, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_windows_managed_closed_ignores_store_last_pid() {
+        assert_eq!(
+            resolve_codex_pid_from_entries(Some(424_242), Some("C:\\Profiles\\Codex Two"), &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn codex_windows_default_resolution_ignores_managed_instance_entry() {
+        let entries = vec![(
+            200,
+            Some("C:\\Profiles\\Codex Two\\electron-user-data".to_string()),
+        )];
+
+        assert_eq!(resolve_codex_pid_from_entries(None, None, &entries), None);
     }
 }
