@@ -468,13 +468,24 @@ fn create_file_symlink(_source: &Path, _target: &Path) -> Result<(), String> {
 
 #[cfg(windows)]
 fn create_file_live_link(source: &Path, target: &Path) -> Result<(), String> {
-    std::os::windows::fs::symlink_file(source, target).map_err(|e| {
-        format!(
-            "create live shared history file symlink failed ({} -> {}): {}",
-            display_abs_path(source),
-            display_abs_path(target),
-            e
-        )
+    create_shared_file_link_or_copy_with(source, target, |source, target| {
+        match std::os::windows::fs::symlink_file(source, target) {
+            Ok(()) => Ok(()),
+            Err(symlink_err) => {
+                modules::logger::log_warn(&format!(
+                    "Windows live shared history file symlink failed, falling back to hard link: source={}, target={}, error={}",
+                    source.display(),
+                    target.display(),
+                    symlink_err
+                ));
+                std::fs::hard_link(source, target).map_err(|hardlink_err| {
+                    format!(
+                        "create live shared history file link failed: symlink_error={}, hardlink_error={}",
+                        symlink_err, hardlink_err
+                    )
+                })
+            }
+        }
     })
 }
 
@@ -488,6 +499,33 @@ fn create_file_live_link(_source: &Path, _target: &Path) -> Result<(), String> {
     Err("current system does not support live shared history file links".to_string())
 }
 
+fn create_shared_file_link_or_copy(source: &Path, target: &Path) -> Result<(), String> {
+    create_shared_file_link_or_copy_with(source, target, create_file_symlink)
+}
+
+fn create_shared_file_link_or_copy_with<L>(
+    source: &Path,
+    target: &Path,
+    create_link: L,
+) -> Result<(), String>
+where
+    L: FnOnce(&Path, &Path) -> Result<(), String>,
+{
+    create_link(source, target).or_else(|link_err| {
+        modules::logger::log_warn(&format!(
+            "Shared file link failed, copying shared file instead: source={}, target={}, error={}",
+            source.display(),
+            target.display(),
+            link_err
+        ));
+        fs::copy(source, target).map(|_| ()).map_err(|copy_err| {
+            format!(
+                "create shared file link or copy failed: link_error={}, copy_error={}",
+                link_err, copy_err
+            )
+        })
+    })
+}
 fn remove_symlink(path: &Path) -> Result<(), String> {
     fs::remove_file(path)
         .or_else(|_| fs::remove_dir(path))
@@ -993,7 +1031,7 @@ fn sync_shared_file(
     }
 
     if !instance_file.exists() {
-        return create_file_symlink(&global_file, &instance_file);
+        return create_shared_file_link_or_copy(&global_file, &instance_file);
     }
 
     let instance_meta = fs::symlink_metadata(&instance_file).map_err(|e| {
@@ -1016,7 +1054,7 @@ fn sync_shared_file(
             return Ok(());
         }
         remove_symlink(&instance_file)?;
-        return create_file_symlink(&global_file, &instance_file);
+        return create_shared_file_link_or_copy(&global_file, &instance_file);
     }
 
     if instance_meta.is_file() && files_are_same_entry(&instance_file, &global_file)? {
@@ -1039,7 +1077,7 @@ fn sync_shared_file(
                 e
             )
         })?;
-        return create_file_symlink(&global_file, &instance_file);
+        return create_shared_file_link_or_copy(&global_file, &instance_file);
     }
 
     fs::remove_file(&instance_file).map_err(|e| {
@@ -1049,7 +1087,7 @@ fn sync_shared_file(
             e
         )
     })?;
-    create_file_symlink(&global_file, &instance_file).map_err(|e| {
+    create_shared_file_link_or_copy(&global_file, &instance_file).map_err(|e| {
         format!(
             "强制重建实例共享文件链接失败 ({} -> {}, {}): {}",
             display_abs_path(&global_file),
@@ -1720,7 +1758,17 @@ fn sync_shared_live_file(
         }
     }
 
-    if global_file.exists() || allow_missing_target {
+    if !global_file.exists() && allow_missing_target {
+        fs::write(&global_file, "").map_err(|e| {
+            format!(
+                "create empty global live file failed ({}): {}",
+                display_abs_path(&global_file),
+                e
+            )
+        })?;
+    }
+
+    if global_file.exists() {
         create_file_live_link(&global_file, &instance_file)
     } else {
         Ok(())
@@ -2152,6 +2200,23 @@ mod tests {
         path
     }
 
+    fn assert_live_shared_file(instance_file: &Path, global_file: &Path) {
+        let metadata = fs::symlink_metadata(instance_file).expect("read live shared file metadata");
+        if metadata.file_type().is_symlink() {
+            return;
+        }
+        assert!(metadata.is_file(), "live shared path should be a file");
+        assert!(
+            global_file.exists(),
+            "canonical live shared file should exist"
+        );
+        assert!(
+            files_are_same_entry(instance_file, global_file).unwrap_or(false)
+                || files_have_same_content(instance_file, global_file).unwrap_or(false),
+            "live shared file should be linked or copied from canonical file"
+        );
+    }
+
     fn create_test_state_db(root: &Path) {
         fs::create_dir_all(root).expect("create state db root");
         let connection = Connection::open(root.join(CODEX_SHARED_STATE_DB_FILE_NAME))
@@ -2281,6 +2346,41 @@ mod tests {
 
         let content = fs::read_to_string(&target).expect("read through link");
         assert_eq!(content, "shared");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn windows_live_history_file_falls_back_without_admin_symlink_privilege() {
+        let root = make_temp_dir("codex-live-file-link-test");
+        let source = root.join("session_index.jsonl");
+        let target = root.join("instance-session_index.jsonl");
+        fs::write(&source, "shared").expect("write source file");
+
+        create_file_live_link(&source, &target).expect("create live shared history file link");
+
+        let content = fs::read_to_string(&target).expect("read live history file");
+        assert_eq!(content, "shared");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn windows_shared_file_copies_when_link_methods_fail() {
+        let root = make_temp_dir("codex-file-copy-fallback-test");
+        let source = root.join("session_index.jsonl");
+        let target = root.join("instance-session_index.jsonl");
+        fs::write(&source, "shared").expect("write source file");
+
+        create_shared_file_link_or_copy_with(&source, &target, |_, _| {
+            Err("link denied".to_string())
+        })
+        .expect("copy file fallback");
+
+        assert_eq!(
+            fs::read_to_string(&target).expect("read copied file"),
+            "shared"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -2480,10 +2580,10 @@ mod tests {
         assert!(merged_index.contains("\"id\":\"global\""));
         assert!(merged_index.contains("\"id\":\"instance\""));
         let instance_index = profile_dir.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME);
-        assert!(fs::symlink_metadata(&instance_index)
-            .expect("read instance index metadata")
-            .file_type()
-            .is_symlink());
+        assert_live_shared_file(
+            &instance_index,
+            &default_home.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME),
+        );
         let merged_state =
             fs::read_to_string(default_home.join(CODEX_SHARED_GLOBAL_STATE_FILE_NAME))
                 .expect("read merged global state");
@@ -2495,14 +2595,7 @@ mod tests {
             CODEX_SHARED_STATE_DB_WAL_FILE_NAME,
             CODEX_SHARED_STATE_DB_SHM_FILE_NAME,
         ] {
-            assert!(
-                fs::symlink_metadata(profile_dir.join(name))
-                    .expect("read sqlite live link")
-                    .file_type()
-                    .is_symlink(),
-                "{} should be a live symlink",
-                name
-            );
+            assert_live_shared_file(&profile_dir.join(name), &default_home.join(name));
         }
 
         let _ = fs::remove_dir_all(&root);
@@ -2564,15 +2657,10 @@ mod tests {
             .expect("write state db placeholder");
 
         sync_shared_sqlite_history(&profile_dir, &default_home).expect("share sqlite history");
-        assert!(
-            fs::symlink_metadata(profile_dir.join(CODEX_SHARED_STATE_DB_WAL_FILE_NAME))
-                .expect("read wal symlink")
-                .file_type()
-                .is_symlink()
+        assert_live_shared_file(
+            &profile_dir.join(CODEX_SHARED_STATE_DB_WAL_FILE_NAME),
+            &default_home.join(CODEX_SHARED_STATE_DB_WAL_FILE_NAME),
         );
-        assert!(!profile_dir
-            .join(CODEX_SHARED_STATE_DB_WAL_FILE_NAME)
-            .exists());
 
         sync_shared_sqlite_history(&profile_dir, &default_home)
             .expect("share sqlite history again");
@@ -2590,11 +2678,10 @@ mod tests {
 
         sync_shared_sqlite_history(&profile_dir, &default_home).expect("share sqlite history");
         let instance_db = profile_dir.join(CODEX_SHARED_STATE_DB_FILE_NAME);
-        assert!(fs::symlink_metadata(&instance_db)
-            .expect("read db symlink")
-            .file_type()
-            .is_symlink());
-        assert!(!default_home.join(CODEX_SHARED_STATE_DB_FILE_NAME).exists());
+        assert_live_shared_file(
+            &instance_db,
+            &default_home.join(CODEX_SHARED_STATE_DB_FILE_NAME),
+        );
 
         let connection = Connection::open(&instance_db).expect("open db through symlink");
         connection
@@ -2639,17 +2726,13 @@ mod tests {
                 .expect("read canonical global state"),
             "{}\n"
         );
-        assert!(
-            fs::symlink_metadata(profile_dir.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME))
-                .expect("read instance index link")
-                .file_type()
-                .is_symlink()
+        assert_live_shared_file(
+            &profile_dir.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME),
+            &default_home.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME),
         );
-        assert!(
-            fs::symlink_metadata(profile_dir.join(CODEX_SHARED_GLOBAL_STATE_FILE_NAME))
-                .expect("read instance state link")
-                .file_type()
-                .is_symlink()
+        assert_live_shared_file(
+            &profile_dir.join(CODEX_SHARED_GLOBAL_STATE_FILE_NAME),
+            &default_home.join(CODEX_SHARED_GLOBAL_STATE_FILE_NAME),
         );
 
         let _ = fs::remove_dir_all(&root);
@@ -2697,11 +2780,9 @@ mod tests {
             .join(CODEX_ELECTRON_USER_DATA_DIR_NAME)
             .join(CODEX_ELECTRON_AUTH_MARKER_FILE_NAME)
             .exists());
-        assert!(
-            fs::symlink_metadata(profile_dir.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME))
-                .expect("read shared index metadata")
-                .file_type()
-                .is_symlink()
+        assert_live_shared_file(
+            &profile_dir.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME),
+            &default_home.join(CODEX_SHARED_SESSION_INDEX_FILE_NAME),
         );
 
         let _ = fs::remove_dir_all(&root);
