@@ -36,6 +36,8 @@ import type {
   CodexLocalAccessStatsWindow,
   CodexLocalAccessUsageEvent,
   CodexLocalAccessUsageStats,
+  CodexLocalAccessDiagnostics,
+  CodexLocalAccessAlert,
 } from '../types/codexLocalAccess';
 import {
   getCodexPlanFilterKey,
@@ -70,6 +72,7 @@ interface CodexLocalAccessModalProps {
   initialSelectedIds: string[];
   maskAccountText: (value?: string | null) => string;
   onClose: () => void;
+  onOpenServiceInstances?: () => void;
   onSaveAccounts: (payload: {
     accountIds: string[];
     restrictFreeAccounts: boolean;
@@ -102,6 +105,7 @@ interface CodexLocalAccessModalProps {
   onKillPort: () => Promise<unknown> | unknown;
   onToggleEnabled: () => Promise<unknown> | unknown;
   onTest: () => Promise<number> | number;
+  onTestUpstream: (accountId: string) => Promise<unknown> | unknown;
   saving: boolean;
   testing: boolean;
   starting: boolean;
@@ -109,7 +113,8 @@ interface CodexLocalAccessModalProps {
 }
 
 type StatsRangeKey = 'daily' | 'weekly' | 'monthly';
-type CopyableField = 'apiPortUrl' | 'baseUrl' | 'modelId' | `apiKey:${string}`;
+type CopyableField = 'apiPortUrl' | 'baseUrl' | 'modelId' | 'diagnostics' | `apiKey:${string}`;
+type UpstreamHealthFilter = 'all' | 'issue' | 'cooling' | 'unauthorized';
 type ApiKeyDraft = {
   name: string;
   enabled: boolean;
@@ -145,6 +150,14 @@ const OPENAI_PRICING_SOURCE_URL = 'https://developers.openai.com/api/docs/pricin
 const TOKEN_PRICE_DENOMINATOR = 1_000_000;
 const LEGACY_UNKNOWN_MODEL_PRICE_ID = 'unknown';
 const MODEL_STATS_COLLAPSED_LIMIT = 8;
+
+const EMPTY_LOCAL_ACCESS_DIAGNOSTICS: CodexLocalAccessDiagnostics = {
+  status: 'unavailable',
+  alerts: [],
+  upstreams: [],
+  apiKeys: [],
+  events: [],
+};
 
 const DEFAULT_MODEL_PRICES: CodexModelPrice[] = [
   { modelId: LEGACY_UNKNOWN_MODEL_PRICE_ID, inputUsdPerMillion: 5, cachedInputUsdPerMillion: 0.5, outputUsdPerMillion: 30, source: 'builtin', updatedAt: 0 },
@@ -495,6 +508,23 @@ function formatCostEstimate(estimate: CostEstimate): string {
   return `${formatUsd(estimate.usd)}${estimate.unknownModelIds.length > 0 ? '+' : ''}`;
 }
 
+function formatRatioPercent(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '--';
+  return `${Math.round(Math.max(0, value) * 100)}%`;
+}
+
+function formatHealthStatusLabel(status: string, t: ReturnType<typeof useTranslation>['t']): string {
+  if (status === 'healthy') return t('codex.localAccess.health.statusHealthy', '正常');
+  if (status === 'degraded') return t('codex.localAccess.health.statusDegraded', '部分异常');
+  return t('codex.localAccess.health.statusUnavailable', '不可用');
+}
+
+function getHealthToneClass(status: string): string {
+  if (status === 'healthy') return 'is-healthy';
+  if (status === 'degraded') return 'is-degraded';
+  return 'is-unavailable';
+}
+
 function formatPriceInputValue(value: number | null): string {
   return value == null ? '' : String(value);
 }
@@ -570,6 +600,7 @@ export function CodexLocalAccessModal({
   initialSelectedIds,
   maskAccountText,
   onClose,
+  onOpenServiceInstances,
   onSaveAccounts,
   onClearStats,
   onRefreshStats,
@@ -583,6 +614,7 @@ export function CodexLocalAccessModal({
   onKillPort,
   onToggleEnabled,
   onTest,
+  onTestUpstream,
   saving,
   testing,
   starting,
@@ -612,15 +644,25 @@ export function CodexLocalAccessModal({
   const [showAllTotalModels, setShowAllTotalModels] = useState(false);
   const [expandedApiKeyModelIds, setExpandedApiKeyModelIds] = useState<Set<string>>(new Set());
   const [showAllApiKeyModelIds, setShowAllApiKeyModelIds] = useState<Set<string>>(new Set());
+  const [healthFilter, setHealthFilter] = useState<UpstreamHealthFilter>('all');
+  const [diagnosticsExpanded, setDiagnosticsExpanded] = useState(false);
+  const [testingUpstreamIds, setTestingUpstreamIds] = useState<Set<string>>(new Set());
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const collection = state?.collection ?? null;
+  const services = state?.services ?? [];
+  const selectedServiceId = state?.selectedServiceId ?? collection?.id ?? '';
+  const selectedService =
+    services.find((service) => service.id === selectedServiceId)
+    ?? services[0]
+    ?? null;
   const apiKeys = useMemo(() => collection?.apiKeys ?? [], [collection?.apiKeys]);
   const apiPortUrl = state?.apiPortUrl ?? '';
   const baseUrl = state?.baseUrl ?? '';
   const modelIds = state?.modelIds ?? [];
   const stats = state?.stats;
+  const diagnostics = state?.diagnostics ?? EMPTY_LOCAL_ACCESS_DIAGNOSTICS;
   const statsRangeOptions = useMemo(
     () =>
       [
@@ -645,6 +687,14 @@ export function CodexLocalAccessModal({
   const selectedTotals = selectedStatsWindow?.totals;
   const selectedModelStats = selectedStatsWindow?.models ?? [];
   const routingStrategy = collection?.routingStrategy ?? 'auto';
+  const defaultApiKey = useMemo(() => {
+    const defaultId = collection?.defaultApiKeyId?.trim();
+    if (defaultId) {
+      const resolved = apiKeys.find((apiKey) => apiKey.id === defaultId && apiKey.enabled && apiKey.key.trim());
+      if (resolved) return resolved;
+    }
+    return apiKeys.find((apiKey) => apiKey.enabled && apiKey.key.trim()) ?? null;
+  }, [apiKeys, collection?.defaultApiKeyId]);
   const modelIdOptions = useMemo(
     () => modelIds.map((modelId) => ({ value: modelId, label: modelId })),
     [modelIds],
@@ -712,6 +762,9 @@ export function CodexLocalAccessModal({
     setNewApiKeyName('');
     setNewApiKeyLimit('');
     setCopiedField(null);
+    setHealthFilter('all');
+    setDiagnosticsExpanded(false);
+    setTestingUpstreamIds(new Set());
     setPortInput(collection?.port ? String(collection.port) : '');
     if (mode === 'members') {
       window.setTimeout(() => {
@@ -1110,6 +1163,75 @@ export function CodexLocalAccessModal({
     }
     return estimateUsageStatsCost(selectedTotals, pricesByModelId);
   }, [pricesByModelId, selectedModelStats, selectedTotals, selectedUsageEvents]);
+
+  const dailyTotalCost = useMemo(
+    () => estimateModelStatsListCost(stats?.daily.models, pricesByModelId, stats?.daily.totals),
+    [pricesByModelId, stats?.daily.models, stats?.daily.totals],
+  );
+
+  const dailyCostByApiKeyId = useMemo(() => {
+    const next = new Map<string, CostEstimate>();
+    stats?.daily.apiKeys.forEach((apiKeyStats) => {
+      next.set(
+        apiKeyStats.apiKeyId,
+        estimateModelStatsListCost(apiKeyStats.models, pricesByModelId, apiKeyStats.usage),
+      );
+    });
+    return next;
+  }, [pricesByModelId, stats?.daily.apiKeys]);
+
+  const healthFilterOptions = useMemo(
+    () =>
+      [
+        { key: 'all', label: t('codex.localAccess.health.filterAll', '全部') },
+        { key: 'issue', label: t('codex.localAccess.health.filterIssue', '异常') },
+        { key: 'cooling', label: t('codex.localAccess.health.filterCooling', '冷却中') },
+        { key: 'unauthorized', label: t('codex.localAccess.health.filterUnauthorized', '未授权') },
+      ] satisfies Array<{ key: UpstreamHealthFilter; label: string }>,
+    [t],
+  );
+
+  const upstreamHealthRows = useMemo(() => {
+    const rows = diagnostics.upstreams ?? [];
+    return rows.filter((upstream) => {
+      if (healthFilter === 'issue') {
+        return upstream.selected && (!upstream.eligible || !upstream.healthy || upstream.consecutiveFailures > 0);
+      }
+      if (healthFilter === 'cooling') return upstream.coolingDown;
+      if (healthFilter === 'unauthorized') return upstream.authorizedApiKeyCount === 0;
+      return true;
+    });
+  }, [diagnostics.upstreams, healthFilter]);
+
+  const selectedUpstreamHealth = diagnostics.upstreams.filter((upstream) => upstream.selected);
+  const availableUpstreamCount = selectedUpstreamHealth.filter(
+    (upstream) => upstream.eligible && upstream.healthy && !upstream.coolingDown,
+  ).length;
+  const abnormalUpstreamCount = selectedUpstreamHealth.filter(
+    (upstream) => !upstream.eligible || !upstream.healthy || upstream.coolingDown,
+  ).length;
+  const healthAlerts = useMemo<CodexLocalAccessAlert[]>(() => {
+    const alerts = [...diagnostics.alerts];
+    if (dailyTotalCost.unknownModelIds.length > 0) {
+      alerts.unshift({
+        id: 'pricing:unknown-daily',
+        severity: 'warning',
+        category: 'pricing',
+        message: t('codex.localAccess.health.unknownPriceAlert', {
+          models: dailyTotalCost.unknownModelIds.join(', '),
+          defaultValue: '今日请求包含未配置价格模型: {{models}}',
+        }),
+        accountId: null,
+        apiKeyId: null,
+        createdAt: stats?.daily.updatedAt ?? Date.now(),
+      });
+    }
+    return alerts;
+  }, [dailyTotalCost.unknownModelIds, diagnostics.alerts, stats?.daily.updatedAt, t]);
+  const displayHealthStatus =
+    diagnostics.status === 'healthy' && dailyTotalCost.unknownModelIds.length > 0
+      ? 'degraded'
+      : diagnostics.status;
 
   const summaryStats = useMemo(
     () => [
@@ -1774,6 +1896,44 @@ export function CodexLocalAccessModal({
     }
   };
 
+  const handleTestUpstream = async (accountId: string) => {
+    if (!accountId || testingUpstreamIds.has(accountId)) return;
+    setError('');
+    setNotice('');
+    setTestingUpstreamIds((current) => new Set(current).add(accountId));
+    try {
+      await onTestUpstream(accountId);
+      setNotice(t('codex.localAccess.upstreamHealthCheckDone', '上游健康检查已完成'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTestingUpstreamIds((current) => {
+        const next = new Set(current);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  };
+
+  const buildDiagnosticsSummary = () => {
+    const lines = [
+      `status=${diagnostics.status}`,
+      `port=${collection?.port ?? '-'}`,
+      `defaultKey=${defaultApiKey?.name ?? '-'}`,
+      `availableUpstreams=${availableUpstreamCount}/${selectedUpstreamHealth.length}`,
+      `alerts=${diagnostics.alerts.length}`,
+    ];
+    diagnostics.alerts.slice(0, 8).forEach((alert) => {
+      lines.push(`[${alert.severity}] ${alert.category}: ${alert.message}`);
+    });
+    diagnostics.events.slice(0, 12).forEach((event) => {
+      lines.push(
+        `[${formatLocalDateTime(event.timestamp)}] ${event.severity}/${event.category} status=${event.statusCode ?? '-'} apiKey=${event.apiKeyId ?? '-'} account=${event.accountId ?? '-'} model=${event.modelId ?? '-'} retryable=${event.retryable ? 'yes' : 'no'} ${event.message}`,
+      );
+    });
+    return lines.join('\n');
+  };
+
   if (!isOpen) return null;
   const isMembersMode = mode === 'members';
 
@@ -1819,8 +1979,30 @@ export function CodexLocalAccessModal({
                   <span className="codex-local-access-subtle-badge">
                     {t('codex.localAccess.memberOnlyLocal', '本机/局域网')}
                   </span>
+                  {selectedService && (
+                    <span
+                      className="codex-local-access-subtle-badge codex-local-access-service-context-badge"
+                      title={`${selectedService.name} · ${selectedService.port}`}
+                    >
+                      <Server size={12} />
+                      {selectedService.name}
+                    </span>
+                  )}
                 </div>
                 <div className="codex-local-access-header-tools">
+                  {onOpenServiceInstances && services.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm codex-local-access-service-panel-btn"
+                      onClick={onOpenServiceInstances}
+                      disabled={actionBusy}
+                      title={t('codex.localAccess.serviceInstancesAction', '服务实例')}
+                      aria-label={t('codex.localAccess.serviceInstancesAction', '服务实例')}
+                    >
+                      <Server size={14} />
+                      <span>{t('codex.localAccess.serviceInstancesAction', '服务实例')}</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="folder-icon-btn codex-local-access-toolbar-btn"
@@ -1923,6 +2105,72 @@ export function CodexLocalAccessModal({
           )}
 
           {!isMembersMode && (
+            <section className="codex-local-access-section codex-local-access-section-surface codex-local-access-health-section">
+              <div className="codex-local-access-section-head">
+                <div className="codex-local-access-section-title">
+                  <ShieldCheck size={16} />
+                  <span>{t('codex.localAccess.health.title', '服务健康概览')}</span>
+                </div>
+                <span className={`codex-local-access-health-status ${getHealthToneClass(displayHealthStatus)}`}>
+                  {formatHealthStatusLabel(displayHealthStatus, t)}
+                </span>
+              </div>
+              <div className="codex-local-access-health-grid">
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.port', '端口')}</span>
+                  <strong>{collection?.port ?? '--'}</strong>
+                </div>
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.defaultKey', '默认密钥')}</span>
+                  <strong title={defaultApiKey?.name ?? undefined}>
+                    {defaultApiKey?.name ?? t('codex.localAccess.health.noDefaultKey', '无')}
+                  </strong>
+                </div>
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.upstreams', '可用上游')}</span>
+                  <strong>{availableUpstreamCount}/{selectedUpstreamHealth.length}</strong>
+                </div>
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.badUpstreams', '异常上游')}</span>
+                  <strong>{abnormalUpstreamCount}</strong>
+                </div>
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.todayRequests', '今日请求')}</span>
+                  <strong>{formatCompactNumber(stats?.daily.totals.requestCount ?? 0)}</strong>
+                </div>
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.todayTokens', '今日 Token')}</span>
+                  <strong>{formatCompactNumber(stats?.daily.totals.totalTokens ?? 0)}</strong>
+                </div>
+                <div className="codex-local-access-health-metric">
+                  <span>{t('codex.localAccess.health.todayCost', '今日费用')}</span>
+                  <strong title={dailyTotalCost.unknownModelIds.join(', ') || undefined}>
+                    {formatCostEstimate(dailyTotalCost)}
+                  </strong>
+                </div>
+              </div>
+              {healthAlerts.length > 0 && (
+                <div className="codex-local-access-alert-list">
+                  {healthAlerts.slice(0, 6).map((alert) => (
+                    <div
+                      key={alert.id}
+                      className={`codex-local-access-alert-item is-${alert.severity || 'warning'}`}
+                    >
+                      <CircleAlert size={13} />
+                      <span title={alert.message}>{alert.message}</span>
+                    </div>
+                  ))}
+                  {healthAlerts.length > 6 && (
+                    <span className="codex-local-access-subtle-badge">
+                      +{healthAlerts.length - 6}
+                    </span>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {!isMembersMode && (
             <section className="codex-local-access-section codex-local-access-section-surface codex-local-access-summary-block">
               <div className="codex-local-access-summary-head">
                 <div className="codex-local-access-section-title">
@@ -2014,6 +2262,238 @@ export function CodexLocalAccessModal({
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {!isMembersMode && (
+            <section className="codex-local-access-section codex-local-access-section-surface codex-local-access-upstream-health-section">
+              <div className="codex-local-access-section-head">
+                <div className="codex-local-access-section-title">
+                  <Server size={16} />
+                  <span>{t('codex.localAccess.health.upstreamTitle', '上游健康')}</span>
+                </div>
+                <div className="codex-local-access-health-filter-tabs">
+                  {healthFilterOptions.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      className={healthFilter === option.key ? 'is-active' : ''}
+                      onClick={() => setHealthFilter(option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="codex-local-access-health-list">
+                {upstreamHealthRows.length === 0 ? (
+                  <div className="group-account-empty">
+                    {t('codex.localAccess.health.upstreamEmpty', '当前筛选下没有上游')}
+                  </div>
+                ) : (
+                  upstreamHealthRows.map((upstream) => {
+                    const healthy = upstream.selected && upstream.eligible && upstream.healthy && !upstream.coolingDown;
+                    const testingUpstream = testingUpstreamIds.has(upstream.accountId);
+                    return (
+                      <div
+                        key={upstream.accountId}
+                        className={`codex-local-access-health-row${healthy ? '' : ' has-warning'}${upstream.selected ? '' : ' is-muted'}`}
+                      >
+                        <div className="codex-local-access-health-row-main">
+                          <span className="group-account-email" title={maskAccountText(upstream.email)}>
+                            {maskAccountText(upstream.email)}
+                          </span>
+                          <span className={`tier-badge ${upstream.sourceType === 'openai_compatible' ? 'team' : 'pro'}`}>
+                            {upstream.sourceType === 'openai_compatible'
+                              ? t('codex.localAccess.health.openaiCompatible', '中转站')
+                              : t('codex.localAccess.health.codexOauth', 'OAuth')}
+                          </span>
+                          <span className={`codex-local-access-health-pill ${healthy ? 'is-healthy' : 'is-warning'}`}>
+                            {healthy
+                              ? t('codex.localAccess.health.ok', '正常')
+                              : upstream.coolingDown
+                                ? t('codex.localAccess.health.cooling', '冷却中')
+                                : upstream.eligible
+                                  ? t('codex.localAccess.health.issue', '异常')
+                                  : t('codex.localAccess.health.ineligible', '不可用')}
+                          </span>
+                          <span className="codex-local-access-member-metric" title={upstream.baseUrlHost ?? upstream.providerName ?? ''}>
+                            {upstream.baseUrlHost || upstream.providerName || '--'}
+                          </span>
+                        </div>
+                        <div className="codex-local-access-health-row-metrics">
+                          <span>{t('codex.localAccess.health.authorizedKeys', {
+                            count: upstream.authorizedApiKeyCount,
+                            defaultValue: '授权密钥 {{count}}',
+                          })}</span>
+                          <span>{t('codex.localAccess.health.lastSuccess', {
+                            time: formatLocalDateTime(upstream.lastSuccessAt),
+                            defaultValue: '成功 {{time}}',
+                          })}</span>
+                          <span>{t('codex.localAccess.health.lastFailure', {
+                            time: formatLocalDateTime(upstream.lastFailureAt),
+                            defaultValue: '失败 {{time}}',
+                          })}</span>
+                          <span>{t('codex.localAccess.health.failures', {
+                            count: upstream.consecutiveFailures,
+                            defaultValue: '连续失败 {{count}}',
+                          })}</span>
+                          <span>{formatLatencyMs(upstream.averageLatencyMs)}</span>
+                        </div>
+                        <div className="codex-local-access-health-row-actions">
+                          {upstream.lastFailureReason && (
+                            <span className="codex-local-access-health-reason" title={upstream.lastFailureReason}>
+                              {upstream.lastFailureReason}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => void handleTestUpstream(upstream.accountId)}
+                            disabled={testingUpstream || saving}
+                          >
+                            <RefreshCw size={14} className={testingUpstream ? 'loading-spinner' : ''} />
+                            {t('codex.localAccess.health.check', '健康检查')}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          )}
+
+          {!isMembersMode && (
+            <section className="codex-local-access-section codex-local-access-section-surface codex-local-access-api-key-risk-section">
+              <div className="codex-local-access-section-title">
+                <KeyRound size={16} />
+                <span>{t('codex.localAccess.health.apiKeyRiskTitle', '用户密钥风险')}</span>
+              </div>
+              <div className="codex-local-access-health-list">
+                {diagnostics.apiKeys.length === 0 ? (
+                  <div className="group-account-empty">
+                    {t('codex.localAccess.apiKeyEmpty', '当前还没有 API Key')}
+                  </div>
+                ) : (
+                  diagnostics.apiKeys.map((apiKeyHealth) => {
+                    const dailyCost = dailyCostByApiKeyId.get(apiKeyHealth.apiKeyId) ?? { usd: 0, unknownModelIds: [] };
+                    const riskBadges: string[] = [];
+                    if (!apiKeyHealth.enabled) {
+                      riskBadges.push(t('codex.localAccess.apiKeyDisabled', '停用'));
+                    }
+                    if (apiKeyHealth.enabled && apiKeyHealth.authorizedAccountCount === 0) {
+                      riskBadges.push(t('codex.localAccess.health.noAuthorizedUpstream', '无授权上游'));
+                    } else if (apiKeyHealth.enabled && apiKeyHealth.availableAccountCount === 0) {
+                      riskBadges.push(t('codex.localAccess.health.noAvailableUpstream', '授权上游不可用'));
+                    }
+                    if ((apiKeyHealth.monthlyUsageRatio ?? 0) >= 0.9) {
+                      riskBadges.push(t('codex.localAccess.health.nearLimit', '接近月额度'));
+                    }
+                    if (dailyCost.unknownModelIds.length > 0) {
+                      riskBadges.push(t('codex.localAccess.health.unknownPrice', '未知价格'));
+                    }
+                    return (
+                      <div key={apiKeyHealth.apiKeyId} className="codex-local-access-health-row">
+                        <div className="codex-local-access-health-row-main">
+                          <span className="group-account-email" title={apiKeyHealth.apiKeyName}>
+                            {apiKeyHealth.apiKeyName}
+                          </span>
+                          {apiKeyHealth.isDefault && (
+                            <span className="codex-local-access-default-key-badge">
+                              <ShieldCheck size={13} />
+                              {t('codex.localAccess.defaultApiKeyBadge', '默认')}
+                            </span>
+                          )}
+                          <span className={`codex-local-access-health-pill ${riskBadges.length === 0 ? 'is-healthy' : 'is-warning'}`}>
+                            {riskBadges.length === 0
+                              ? t('codex.localAccess.health.ok', '正常')
+                              : riskBadges.join(' · ')}
+                          </span>
+                        </div>
+                        <div className="codex-local-access-health-row-metrics">
+                          <span>{t('codex.localAccess.health.keyUpstreams', {
+                            available: apiKeyHealth.availableAccountCount,
+                            total: apiKeyHealth.authorizedAccountCount,
+                            defaultValue: '可用 {{available}}/{{total}}',
+                          })}</span>
+                          <span>{t('codex.localAccess.health.monthlyUsed', {
+                            tokens: formatCompactNumber(apiKeyHealth.monthlyTokensUsed),
+                            percent: formatRatioPercent(apiKeyHealth.monthlyUsageRatio),
+                            defaultValue: '近30天 {{tokens}} · {{percent}}',
+                          })}</span>
+                          <span>{t('codex.localAccess.health.todayCostValue', {
+                            cost: formatCostEstimate(dailyCost),
+                            defaultValue: '今日 {{cost}}',
+                          })}</span>
+                          <span>{t('codex.localAccess.health.lastFailure', {
+                            time: formatLocalDateTime(apiKeyHealth.lastFailureAt),
+                            defaultValue: '失败 {{time}}',
+                          })}</span>
+                        </div>
+                        {apiKeyHealth.lastFailureReason && (
+                          <div className="codex-local-access-health-row-actions">
+                            <span className="codex-local-access-health-reason" title={apiKeyHealth.lastFailureReason}>
+                              {apiKeyHealth.lastFailureReason}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          )}
+
+          {!isMembersMode && (
+            <section className="codex-local-access-section codex-local-access-section-surface codex-local-access-diagnostics-section">
+              <div className="codex-local-access-section-head">
+                <button
+                  type="button"
+                  className="codex-local-access-model-stats-toggle"
+                  onClick={() => setDiagnosticsExpanded((current) => !current)}
+                  aria-expanded={diagnosticsExpanded}
+                >
+                  {diagnosticsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <span>{t('codex.localAccess.health.diagnosticsTitle', {
+                    count: diagnostics.events.length,
+                    defaultValue: '最近诊断事件 {{count}}',
+                  })}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void handleCopy('diagnostics', buildDiagnosticsSummary())}
+                  disabled={diagnostics.events.length === 0 && diagnostics.alerts.length === 0}
+                >
+                  <Copy size={14} />
+                  {copiedField === 'diagnostics'
+                    ? t('common.copied', '已复制')
+                    : t('codex.localAccess.health.copyDiagnostics', '复制摘要')}
+                </button>
+              </div>
+              {diagnosticsExpanded && (
+                <div className="codex-local-access-diagnostics-list">
+                  {diagnostics.events.length === 0 ? (
+                    <div className="group-account-empty">
+                      {t('codex.localAccess.health.noDiagnostics', '暂无诊断事件')}
+                    </div>
+                  ) : (
+                    diagnostics.events.slice(0, 80).map((event, index) => (
+                      <div key={`${event.timestamp}-${index}`} className={`codex-local-access-diagnostic-row is-${event.severity || 'warning'}`}>
+                        <span>{formatLocalDateTime(event.timestamp)}</span>
+                        <span>{event.severity || '--'}</span>
+                        <span>{event.category || '--'}</span>
+                        <span>{event.statusCode ?? '--'}</span>
+                        <code title={event.modelId ?? ''}>{event.modelId || '--'}</code>
+                        <span title={event.baseUrlHost ?? ''}>{event.baseUrlHost || '--'}</span>
+                        <span title={event.message}>{event.message}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </section>

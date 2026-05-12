@@ -17,7 +17,6 @@ import {
   X,
   Globe,
   KeyRound,
-  Power,
   Database,
   Copy,
   Check,
@@ -48,8 +47,6 @@ import {
   FolderPlus,
   ChevronRight,
   LogOut,
-  Server,
-  Wrench,
   Terminal,
 } from 'lucide-react';
 import { useCodexAccountStore } from '../stores/useCodexAccountStore';
@@ -64,6 +61,8 @@ import { PaginationControls } from '../components/PaginationControls';
 import { CodexAccountGroupModal, CodexAddToGroupModal } from '../components/CodexAccountGroupModal';
 import { CodexGroupAccountPickerModal } from '../components/CodexGroupAccountPickerModal';
 import { CodexLocalAccessModal } from '../components/CodexLocalAccessModal';
+import { CodexLocalAccessServiceInstancesModal } from '../components/CodexLocalAccessServiceInstancesModal';
+import { CodexLocalAccessServicesPanel } from '../components/CodexLocalAccessServicesPanel';
 import {
   type CodexAccountGroup,
   assignAccountsToCodexGroup,
@@ -108,6 +107,7 @@ import type {
   CodexLocalAccessApiKey,
   CodexLocalAccessCollection,
   CodexLocalAccessRoutingStrategy,
+  CodexLocalAccessServiceSummary,
   CodexLocalAccessState,
 } from '../types/codexLocalAccess';
 import { CODEX_API_SERVICE_BIND_ID, type InstanceProfile } from '../types/instance';
@@ -203,12 +203,10 @@ function inferCodexAccountProviderMode(account: CodexAccount): CodexApiProviderM
   return 'custom';
 }
 const CODEX_OVERVIEW_LAYOUT_MODE_KEY = 'agtools.codex.accounts.overview_layout_mode';
-const CODEX_LOCAL_ACCESS_EXPANDED_KEY = 'agtools.codex.local_access_entry_expanded.v1';
 const CODEX_CUSTOM_SORT_ORDER_KEY = 'agtools.codex.accounts.custom_sort_order.v1';
 const DEFAULT_CODEX_API_PROVIDER_ID = CODEX_API_PROVIDER_CUSTOM_ID;
 const CODEX_LOCAL_ACCESS_FALLBACK_PORT = 54140;
 const CODEX_LOCAL_ACCESS_FALLBACK_BASE_URL = `http://127.0.0.1:${CODEX_LOCAL_ACCESS_FALLBACK_PORT}/v1`;
-const CODEX_LOCAL_ACCESS_FALLBACK_API_KEY_MASK = 'agt_codex_••••••••••••';
 const CODEX_FILTER_PERSISTENCE_SCOPE = normalizeAccountsOverviewScope('Codex');
 const FILTER_TYPES_FIELD = 'filter_types';
 const EXPIRY_FILTER_FIELD = 'expiry_filter';
@@ -383,6 +381,7 @@ export function CodexAccountsPage() {
   const [removingGroupAccountIds, setRemovingGroupAccountIds] = useState<Set<string>>(new Set());
   const [localAccessState, setLocalAccessState] = useState<CodexLocalAccessState | null>(null);
   const [showLocalAccessModal, setShowLocalAccessModal] = useState(false);
+  const [showLocalAccessServiceInstancesModal, setShowLocalAccessServiceInstancesModal] = useState(false);
   const [localAccessModalMode, setLocalAccessModalMode] = useState<'panel' | 'members'>('panel');
   const [localAccessSaving, setLocalAccessSaving] = useState(false);
   const [localAccessTesting, setLocalAccessTesting] = useState(false);
@@ -403,19 +402,10 @@ export function CodexAccountsPage() {
     scrollKey: apiSwitchNoticeErrorScrollKey,
     set: setApiSwitchNoticeError,
   } = useModalErrorState();
-  const [localAccessCopiedField, setLocalAccessCopiedField] = useState<'baseUrl' | 'apiKey' | null>(null);
-  const [localAccessKeyVisible, setLocalAccessKeyVisible] = useState(false);
   const [localAccessEntryVisible, setLocalAccessEntryVisible] = useState(true);
   const [localAccessLaunchCurrent, setLocalAccessLaunchCurrent] = useState(false);
   const [showLocalAccessQuotaStatsModal, setShowLocalAccessQuotaStatsModal] = useState(false);
   const localAccessRiskNoticeResolverRef = useRef<((accepted: boolean) => void) | null>(null);
-  const [localAccessDetailsExpanded, setLocalAccessDetailsExpanded] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(CODEX_LOCAL_ACCESS_EXPANDED_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
 
   const reloadCodexGroups = useCallback(async () => {
     setCodexGroups(await getCodexAccountGroups());
@@ -562,6 +552,7 @@ export function CodexAccountsPage() {
   }, [activeGroupId, filterPersistenceEnabled, filterPersistenceScope]);
 
   const reloadLocalAccessState = useCallback(async () => {
+    setLocalAccessRefreshing(true);
     try {
       const nextState = await codexLocalAccessService.getCodexLocalAccessState();
       setLocalAccessState(nextState);
@@ -574,6 +565,8 @@ export function CodexAccountsPage() {
         }),
         tone: 'error',
       });
+    } finally {
+      setLocalAccessRefreshing(false);
     }
   }, [setMessage, t]);
 
@@ -625,17 +618,6 @@ export function CodexAccountsPage() {
   useEffect(() => {
     void reloadLocalAccessLaunchCurrent();
   }, [reloadLocalAccessLaunchCurrent]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        CODEX_LOCAL_ACCESS_EXPANDED_KEY,
-        localAccessDetailsExpanded ? '1' : '0',
-      );
-    } catch {
-      // ignore persistence failures
-    }
-  }, [localAccessDetailsExpanded]);
 
   useEffect(() => {
     const handleConfigUpdated = () => {
@@ -1089,7 +1071,6 @@ export function CodexAccountsPage() {
     fetchAccounts,
     fetchCurrentAccount,
     switchAccount,
-    refreshQuota,
     hydrateAccountProfilesIfNeeded,
     updateAccountName,
     updateApiKeyCredentials,
@@ -2761,6 +2742,9 @@ export function CodexAccountsPage() {
   );
 
   const localAccessCollection = localAccessState?.collection ?? null;
+  const localAccessServices = localAccessState?.services ?? [];
+  const selectedLocalAccessServiceId =
+    localAccessState?.selectedServiceId ?? localAccessCollection?.id ?? null;
   const localAccessAccountIdSet = useMemo(
     () => new Set(localAccessCollection?.accountIds ?? []),
     [localAccessCollection?.accountIds],
@@ -2783,14 +2767,6 @@ export function CodexAccountsPage() {
       title: t('codex.localAccess.quotaPool.title', '额度池'),
     }),
     [t],
-  );
-  const localAccessQuotaPreviewItems = useMemo(
-    () => localAccessQuotaPoolSummary.visiblePlans.slice(0, 3),
-    [localAccessQuotaPoolSummary.visiblePlans],
-  );
-  const localAccessQuotaHiddenCount = Math.max(
-    0,
-    localAccessQuotaPoolSummary.visiblePlans.length - localAccessQuotaPreviewItems.length,
   );
   const overviewAccounts = accounts;
   const localAccessBusy =
@@ -2825,30 +2801,8 @@ export function CodexAccountsPage() {
     [],
   );
 
-  const handleCopyLocalAccessValue = useCallback(async (field: 'baseUrl' | 'apiKey', value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setLocalAccessCopiedField(field);
-      window.setTimeout(() => {
-        setLocalAccessCopiedField((current) => (current === field ? null : current));
-      }, 1200);
-    } catch (error) {
-      console.error('Failed to copy local access value:', error);
-      setMessage({
-        text: t('common.shared.export.copyFailed', '复制失败，请手动复制'),
-        tone: 'error',
-      });
-    }
-  }, [setMessage, t]);
-
-  const openLocalAccessPanel = useCallback(() => {
-    setLocalAccessModalMode('panel');
-    setShowLocalAccessModal(true);
-  }, []);
-
-  const openLocalAccessMemberPicker = useCallback(() => {
-    setLocalAccessModalMode('members');
-    setShowLocalAccessModal(true);
+  const openLocalAccessServiceInstances = useCallback(() => {
+    setShowLocalAccessServiceInstancesModal(true);
   }, []);
 
   const handleHideLocalAccessEntry = useCallback(() => {
@@ -2860,7 +2814,10 @@ export function CodexAccountsPage() {
     setLocalAccessHideSubmitting(true);
     try {
       if (localAccessCollection?.enabled) {
-        const nextState = await codexLocalAccessService.setCodexLocalAccessEnabled(false);
+        const nextState = await codexLocalAccessService.setCodexLocalAccessEnabled(
+          selectedLocalAccessServiceId,
+          false,
+        );
         setLocalAccessState(nextState);
       }
       await invoke('set_codex_local_access_entry_visible', { enabled: false });
@@ -2880,7 +2837,7 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessHideSubmitting(false);
     }
-  }, [localAccessCollection?.enabled, localAccessHideSubmitting, setMessage, t]);
+  }, [localAccessCollection?.enabled, localAccessHideSubmitting, selectedLocalAccessServiceId, setMessage, t]);
 
   useEffect(() => {
     void reloadLocalAccessState();
@@ -2912,6 +2869,7 @@ export function CodexAccountsPage() {
         return true;
       });
       const nextState = await codexLocalAccessService.saveCodexLocalAccessAccounts(
+        selectedLocalAccessServiceId,
         filteredAccountIds,
         restrictFreeAccounts,
       );
@@ -2926,25 +2884,125 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [accounts, setMessage, t]);
+  }, [accounts, selectedLocalAccessServiceId, setMessage, t]);
 
-  const handleRemoveLocalAccessAccount = useCallback(async (accountId: string) => {
-    if (!localAccessCollection) return;
+  const handleCreateLocalAccessService = useCallback(async (name?: string) => {
+    setLocalAccessSaving(true);
     try {
-      await handleSaveLocalAccessAccounts(
-        localAccessCollection.accountIds.filter((id) => id !== accountId),
-        { restrictFreeAccounts: localAccessCollection.restrictFreeAccounts ?? true },
-      );
+      const nextState = await codexLocalAccessService.createCodexLocalAccessService(name);
+      setLocalAccessState(nextState);
+      setMessage({
+        text: t('codex.localAccess.serviceCreateSuccess', 'API 服务已创建'),
+      });
+      return nextState;
+    } catch (error) {
+      console.error('Failed to create local access service:', error);
+      throw new Error(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setLocalAccessSaving(false);
+    }
+  }, [setMessage, t]);
+
+  const handleRenameLocalAccessService = useCallback(async (serviceId: string, name: string) => {
+    setLocalAccessSaving(true);
+    try {
+      const nextState = await codexLocalAccessService.renameCodexLocalAccessService(serviceId, name);
+      setLocalAccessState(nextState);
+      setMessage({
+        text: t('codex.localAccess.serviceRenameSuccess', 'API 服务已重命名'),
+      });
+      return nextState;
+    } catch (error) {
+      console.error('Failed to rename local access service:', error);
+      throw new Error(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setLocalAccessSaving(false);
+    }
+  }, [setMessage, t]);
+
+  const handleDeleteLocalAccessService = useCallback(async (serviceId: string) => {
+    const service = localAccessServices.find((item) => item.id === serviceId);
+    const confirmed = await confirmDialog(
+      t('codex.localAccess.serviceDeleteConfirm', {
+        name: service?.name || serviceId,
+        defaultValue: '删除 {{name}} 会停止该服务并清除该服务统计，确认继续吗？',
+      }),
+      {
+        title: t('codex.localAccess.serviceDeleteTitle', '删除 API 服务'),
+        kind: 'warning',
+        okLabel: t('common.delete', '删除'),
+        cancelLabel: t('common.cancel', '取消'),
+      },
+    );
+    if (!confirmed) {
+      return null;
+    }
+
+    setLocalAccessSaving(true);
+    try {
+      const nextState = await codexLocalAccessService.deleteCodexLocalAccessService(serviceId);
+      setLocalAccessState(nextState);
+      setMessage({
+        text: t('codex.localAccess.serviceDeleteSuccess', 'API 服务已删除'),
+      });
+      return nextState;
+    } catch (error) {
+      console.error('Failed to delete local access service:', error);
+      throw new Error(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setLocalAccessSaving(false);
+    }
+  }, [localAccessServices, setMessage, t]);
+
+  const handleSelectLocalAccessService = useCallback(async (serviceId: string) => {
+    setLocalAccessSaving(true);
+    try {
+      const nextState = await codexLocalAccessService.selectCodexLocalAccessService(serviceId);
+      setLocalAccessState(nextState);
+      return nextState;
+    } catch (error) {
+      console.error('Failed to select local access service:', error);
+      throw new Error(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setLocalAccessSaving(false);
+    }
+  }, []);
+
+  const openLocalAccessPanelForService = useCallback(async (serviceId: string) => {
+    try {
+      if (serviceId && serviceId !== selectedLocalAccessServiceId) {
+        await handleSelectLocalAccessService(serviceId);
+      }
+      setLocalAccessModalMode('panel');
+      setShowLocalAccessModal(true);
     } catch (error) {
       setMessage({
         text: t('messages.actionFailed', {
-          action: t('accounts.groups.removeFromGroup'),
+          action: t('codex.localAccess.dashboardAction', '服务面板'),
           error: String(error).replace(/^Error:\s*/, ''),
         }),
         tone: 'error',
       });
     }
-  }, [handleSaveLocalAccessAccounts, localAccessCollection, setMessage, t]);
+  }, [handleSelectLocalAccessService, selectedLocalAccessServiceId, setMessage, t]);
+
+  const openLocalAccessMemberPickerForService = useCallback(async (serviceId: string) => {
+    try {
+      if (serviceId && serviceId !== selectedLocalAccessServiceId) {
+        await handleSelectLocalAccessService(serviceId);
+      }
+      setLocalAccessModalMode('members');
+      setShowLocalAccessModal(true);
+    } catch (error) {
+      setMessage({
+        text: t('messages.actionFailed', {
+          action: t('codex.localAccess.manageUpstreamsAction', '选择上游'),
+          error: String(error).replace(/^Error:\s*/, ''),
+        }),
+        tone: 'error',
+      });
+    }
+  }, [handleSelectLocalAccessService, selectedLocalAccessServiceId, setMessage, t]);
 
   const tierCounts = useMemo(() => {
     const counts = { all: overviewAccounts.length, VALID: 0, FREE: 0, PLUS: 0, PRO: 0, TEAM: 0, ENTERPRISE: 0, ERROR: 0 };
@@ -3115,7 +3173,10 @@ export function CodexAccountsPage() {
   }) => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.createCodexLocalAccessApiKey(payload);
+      const nextState = await codexLocalAccessService.createCodexLocalAccessApiKey(
+        selectedLocalAccessServiceId,
+        payload,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.apiKeyCreateSuccess', 'API 服务密钥已创建'),
@@ -3142,6 +3203,7 @@ export function CodexAccountsPage() {
     setLocalAccessSaving(true);
     try {
       const nextState = await codexLocalAccessService.updateCodexLocalAccessApiKey(
+        selectedLocalAccessServiceId,
         apiKeyId,
         payload,
       );
@@ -3156,12 +3218,15 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleSetLocalAccessDefaultApiKey = useCallback(async (apiKeyId: string) => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.setCodexLocalAccessDefaultApiKey(apiKeyId);
+      const nextState = await codexLocalAccessService.setCodexLocalAccessDefaultApiKey(
+        selectedLocalAccessServiceId,
+        apiKeyId,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.defaultApiKeyUpdateSuccess', 'API 服务默认密钥已更新'),
@@ -3173,12 +3238,15 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleRotateLocalAccessApiKey = useCallback(async (apiKeyId: string) => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.rotateCodexLocalAccessApiKey(apiKeyId);
+      const nextState = await codexLocalAccessService.rotateCodexLocalAccessApiKey(
+        selectedLocalAccessServiceId,
+        apiKeyId,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.rotateSuccess', 'API 服务密钥已重置'),
@@ -3190,12 +3258,15 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleDeleteLocalAccessApiKey = useCallback(async (apiKeyId: string) => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.deleteCodexLocalAccessApiKey(apiKeyId);
+      const nextState = await codexLocalAccessService.deleteCodexLocalAccessApiKey(
+        selectedLocalAccessServiceId,
+        apiKeyId,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.apiKeyDeleteSuccess', 'API 服务密钥已删除'),
@@ -3207,12 +3278,14 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleClearLocalAccessStats = useCallback(async () => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.clearCodexLocalAccessStats();
+      const nextState = await codexLocalAccessService.clearCodexLocalAccessStats(
+        selectedLocalAccessServiceId,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.clearStatsSuccess', 'API 服务统计已清空'),
@@ -3224,7 +3297,7 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleKillLocalAccessPort = useCallback(async () => {
     if (!localAccessCollection) return;
@@ -3245,7 +3318,9 @@ export function CodexAccountsPage() {
 
     setLocalAccessPortKilling(true);
     try {
-      const result = await codexLocalAccessService.killCodexLocalAccessPort();
+      const result = await codexLocalAccessService.killCodexLocalAccessPort(
+        selectedLocalAccessServiceId,
+      );
       setLocalAccessState(result.state);
       setMessage({
         text:
@@ -3266,12 +3341,15 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessPortKilling(false);
     }
-  }, [localAccessCollection, setMessage, t]);
+  }, [localAccessCollection, selectedLocalAccessServiceId, setMessage, t]);
 
   const handleUpdateLocalAccessPort = useCallback(async (port: number) => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.updateCodexLocalAccessPort(port);
+      const nextState = await codexLocalAccessService.updateCodexLocalAccessPort(
+        selectedLocalAccessServiceId,
+        port,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.portSaveSuccess', 'API 服务端口已更新'),
@@ -3283,12 +3361,15 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleUpdateLocalAccessRoutingStrategy = useCallback(async (strategy: CodexLocalAccessRoutingStrategy) => {
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.updateCodexLocalAccessRoutingStrategy(strategy);
+      const nextState = await codexLocalAccessService.updateCodexLocalAccessRoutingStrategy(
+        selectedLocalAccessServiceId,
+        strategy,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: t('codex.localAccess.routingSaveSuccess', 'API 服务调度策略已更新'),
@@ -3300,7 +3381,7 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [setMessage, t]);
+  }, [selectedLocalAccessServiceId, setMessage, t]);
 
   const handleToggleLocalAccessEnabled = useCallback(async () => {
     if (!localAccessCollection) return;
@@ -3310,7 +3391,10 @@ export function CodexAccountsPage() {
     }
     setLocalAccessSaving(true);
     try {
-      const nextState = await codexLocalAccessService.setCodexLocalAccessEnabled(!localAccessCollection.enabled);
+      const nextState = await codexLocalAccessService.setCodexLocalAccessEnabled(
+        selectedLocalAccessServiceId,
+        !localAccessCollection.enabled,
+      );
       setLocalAccessState(nextState);
       setMessage({
         text: nextState.collection?.enabled
@@ -3324,7 +3408,35 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessSaving(false);
     }
-  }, [localAccessCollection, requestLocalAccessRiskNotice, setMessage, t]);
+  }, [localAccessCollection, requestLocalAccessRiskNotice, selectedLocalAccessServiceId, setMessage, t]);
+
+  const handleToggleLocalAccessServiceEnabled = useCallback(async (
+    service: CodexLocalAccessServiceSummary,
+  ) => {
+    if (!service.enabled) {
+      const confirmed = await requestLocalAccessRiskNotice('service');
+      if (!confirmed) return;
+    }
+    setLocalAccessSaving(true);
+    try {
+      const nextState = await codexLocalAccessService.setCodexLocalAccessEnabled(
+        service.id,
+        !service.enabled,
+      );
+      setLocalAccessState(nextState);
+      setMessage({
+        text: !service.enabled
+          ? t('codex.localAccess.enabledSuccess', 'API 服务已启用')
+          : t('codex.localAccess.disabledSuccess', 'API 服务已停用'),
+      });
+      return nextState;
+    } catch (error) {
+      console.error('Failed to toggle local access service:', error);
+      throw new Error(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setLocalAccessSaving(false);
+    }
+  }, [requestLocalAccessRiskNotice, setMessage, t]);
 
   const handleTestLocalAccess = useCallback(async () => {
     if (!localAccessCollection) {
@@ -3391,11 +3503,36 @@ export function CodexAccountsPage() {
     }
   }, [localAccessCollection, resolveLocalAccessBaseUrl, resolveLocalAccessDefaultApiKey, t]);
 
-  const handleActivateLocalAccess = useCallback(async (options?: { showSuccessMessage?: boolean }) => {
-    if (!localAccessCollection) {
+  const handleTestLocalAccessUpstream = useCallback(async (accountId: string) => {
+    setLocalAccessTesting(true);
+    try {
+      const nextState = await codexLocalAccessService.testCodexLocalAccessUpstream(
+        selectedLocalAccessServiceId,
+        accountId,
+      );
+      setLocalAccessState(nextState);
+      setMessage({
+        text: t('codex.localAccess.upstreamHealthCheckDone', '上游健康检查已完成'),
+      });
+      return nextState;
+    } catch (error) {
+      console.error('Failed to test local access upstream:', error);
+      throw new Error(String(error).replace(/^Error:\s*/, ''));
+    } finally {
+      setLocalAccessTesting(false);
+    }
+  }, [selectedLocalAccessServiceId, setMessage, t]);
+
+  const handleActivateLocalAccess = useCallback(async (options?: {
+    showSuccessMessage?: boolean;
+    serviceId?: string;
+  }) => {
+    const targetServiceId = options?.serviceId ?? selectedLocalAccessServiceId;
+    const targetService = localAccessServices.find((service) => service.id === targetServiceId);
+    if (!targetServiceId || !targetService) {
       throw new Error(t('codex.localAccess.testUnavailable', '当前 API 服务地址不可用'));
     }
-    if (!localAccessCollection.enabled) {
+    if (!targetService.enabled) {
       const confirmedEnableAndSwitch = await confirmDialog(
         t(
           'codex.localAccess.enableBeforeActivateMessage',
@@ -3414,13 +3551,16 @@ export function CodexAccountsPage() {
     if (!confirmed) return;
     setLocalAccessStarting(true);
     try {
-      const nextState = await codexLocalAccessService.activateCodexLocalAccess();
+      const nextState = await codexLocalAccessService.activateCodexLocalAccess(targetServiceId);
       setLocalAccessState(nextState);
       await fetchCurrentAccount();
       setLocalAccessLaunchCurrent(true);
       if (options?.showSuccessMessage ?? true) {
         setMessage({
-          text: t('codex.localAccess.activateSuccess', '已切换到 API 服务'),
+          text: t('codex.localAccess.activateSuccessWithService', {
+            name: targetService.name,
+            defaultValue: '已切换到 {{name}}',
+          }),
         });
       }
       return nextState;
@@ -3429,26 +3569,19 @@ export function CodexAccountsPage() {
     } finally {
       setLocalAccessStarting(false);
     }
-  }, [fetchCurrentAccount, localAccessCollection, requestLocalAccessRiskNotice, setMessage, t]);
+  }, [
+    fetchCurrentAccount,
+    localAccessServices,
+    requestLocalAccessRiskNotice,
+    selectedLocalAccessServiceId,
+    setMessage,
+    t,
+  ]);
 
-  const handleQuickToggleLocalAccessEnabled = useCallback(async () => {
-    try {
-      await handleToggleLocalAccessEnabled();
-    } catch (error) {
-      setMessage({
-        text: t('messages.actionFailed', {
-          action: t('codex.localAccess.toggleService', '切换 API 服务'),
-          error: String(error).replace(/^Error:\s*/, ''),
-        }),
-        tone: 'error',
-      });
-    }
-  }, [handleToggleLocalAccessEnabled, setMessage, t]);
-
-  const handleQuickActivateLocalAccess = useCallback(async () => {
+  const handleQuickActivateLocalAccessService = useCallback(async (serviceId: string) => {
     try {
       const currentKind = await resolveCurrentCodexLaunchCredentialKind();
-      const state = await handleActivateLocalAccess();
+      const state = await handleActivateLocalAccess({ serviceId });
       if (!state) {
         return;
       }
@@ -3475,65 +3608,6 @@ export function CodexAccountsPage() {
     shouldShowApiSwitchVisibilityNotice,
     t,
   ]);
-
-  const handleQuickRefreshLocalAccessQuota = useCallback(async () => {
-    if (!localAccessCollection) return;
-    const targetIds = localAccessCollection.accountIds.filter((accountId) => {
-      const account = accounts.find((item) => item.id === accountId);
-      return Boolean(account && !isCodexApiKeyAccount(account));
-    });
-
-    if (targetIds.length === 0) {
-      setMessage({
-        text: t('codex.refreshFailed', {
-          error: t('common.shared.quota.noData', '暂无配额数据'),
-        }),
-        tone: 'error',
-      });
-      return;
-    }
-
-    setLocalAccessRefreshing(true);
-    try {
-      const results = await Promise.allSettled(
-        targetIds.map((accountId) => refreshQuota(accountId)),
-      );
-      const successCount = results.filter((result) => result.status === 'fulfilled').length;
-
-      await fetchAccounts();
-      await fetchCurrentAccount();
-
-      if (successCount === targetIds.length) {
-        setMessage({
-          text: t('codex.refreshAllSuccess', { count: successCount }),
-        });
-        return;
-      }
-
-      if (successCount > 0) {
-        setMessage({
-          text: t('codex.refreshAllPartialFailed', {
-            success: successCount,
-            total: targetIds.length,
-          }),
-          tone: 'error',
-        });
-        return;
-      }
-
-      const firstFailure = results.find(
-        (result): result is PromiseRejectedResult => result.status === 'rejected',
-      );
-      setMessage({
-        text: t('codex.refreshFailed', {
-          error: String(firstFailure?.reason ?? '').replace(/^Error:\s*/, ''),
-        }),
-        tone: 'error',
-      });
-    } finally {
-      setLocalAccessRefreshing(false);
-    }
-  }, [accounts, fetchAccounts, fetchCurrentAccount, localAccessCollection, refreshQuota, setMessage, t]);
 
   // ─── Filtering & Sorting ────────────────────────────────────────────
   const customSortOrderIndex = useMemo(() => {
@@ -4107,375 +4181,36 @@ export function CodexAccountsPage() {
       );
     });
 
-  const renderLocalAccessInlineCard = () => {
+  const renderLocalAccessServiceSection = () => {
     if (!localAccessEntryVisible) {
       return null;
     }
 
-    const isGridLocalAccessCard = overviewLayoutMode === 'grid';
-    const showLocalAccessDetails = isGridLocalAccessCard ? true : localAccessDetailsExpanded;
-    const baseUrl = resolveLocalAccessBaseUrl();
-    const activeLocalAccessApiKey = resolveLocalAccessDefaultApiKey(localAccessCollection);
-    const apiKeyDisplay = !activeLocalAccessApiKey
-      ? CODEX_LOCAL_ACCESS_FALLBACK_API_KEY_MASK
-      : localAccessKeyVisible
-        ? activeLocalAccessApiKey.key
-        : `${activeLocalAccessApiKey.key.slice(0, 10)}••••••••••••`;
-    const previewAccounts = localAccessAccounts.slice(0, 3);
-    const hiddenCount = Math.max(0, localAccessAccounts.length - previewAccounts.length);
-    const showLocalAccessEmptyState = previewAccounts.length === 0;
-    const localAccessStatusTone = !localAccessCollection
-      ? 'disabled'
-      : localAccessState?.running
-        ? 'running'
-        : localAccessCollection.enabled
-          ? 'stopped'
-          : 'disabled';
-    const localAccessStatusText = !localAccessCollection
-      ? t('codex.localAccess.statusDisabled', '已停用')
-      : localAccessState?.running
-        ? t('codex.localAccess.statusRunning', '运行中')
-        : localAccessCollection.enabled
-          ? t('codex.localAccess.statusStopped', '未运行')
-          : t('codex.localAccess.statusDisabled', '已停用');
-    const isLocalAccessCurrent = localAccessLaunchCurrent;
-    const localAccessSummaryMeta = t('codex.localAccess.summaryMeta', {
-      count: localAccessState?.memberCount ?? 0,
-      defaultValue: '{{count}} 个账号 · 本机/局域网',
-    });
-    const localAccessEmptyMessage = t('codex.localAccess.emptyMembers', '当前集合暂无账号');
-
     return (
-      <div
-        key="codex-local-access-card"
-        className={`codex-account-card folder-inline-card codex-local-access-card codex-local-access-card--${overviewLayoutMode} ${
-          isLocalAccessCurrent ? 'current' : ''
-        } ${
-          showLocalAccessDetails ? 'is-expanded' : 'is-collapsed'
-        }`}
-      >
-        <div className="folder-inline-header codex-local-access-header">
-          {isGridLocalAccessCard ? (
-            <>
-              <div className="folder-inline-icon codex-local-access-icon">
-                <Server size={24} />
-              </div>
-              <div className="folder-inline-info">
-                <div className="codex-local-access-title-row">
-                  <span className="folder-inline-name">{t('codex.localAccess.title', 'API 服务')}</span>
-                </div>
-                <span className="folder-inline-count">
-                  {t('codex.localAccess.memberOnlyLocal', '本机/局域网')}
-                </span>
-              </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="codex-local-access-summary-trigger"
-              onClick={() => setLocalAccessDetailsExpanded((current) => !current)}
-              title={
-                showLocalAccessDetails
-                  ? t('codex.localAccess.collapseDetails', '收起详情')
-                  : t('codex.localAccess.expandDetails', '展开详情')
-              }
-            >
-              <div className="folder-inline-icon codex-local-access-icon">
-                <Server size={24} />
-              </div>
-              <div className="folder-inline-info">
-                <div className="codex-local-access-title-row">
-                  <span className="folder-inline-name">{t('codex.localAccess.title', 'API 服务')}</span>
-                  <span className="codex-local-access-summary-text">{localAccessSummaryMeta}</span>
-                </div>
-                <span className="folder-inline-count">
-                  {t('codex.localAccess.memberOnlyLocal', '本机/局域网')}
-                </span>
-              </div>
-            </button>
-          )}
-          <div className="codex-local-access-header-actions">
-            {isLocalAccessCurrent && (
-              <span className="current-tag">{t('codex.current', '当前')}</span>
-            )}
-            <span className={`codex-local-access-status ${localAccessStatusTone}`}>
-              {localAccessStatusText}
-            </span>
-            {!isGridLocalAccessCard && (
-              <button
-                type="button"
-                className="folder-icon-btn codex-local-access-toggle-btn"
-                onClick={() => setLocalAccessDetailsExpanded((current) => !current)}
-                title={
-                  showLocalAccessDetails
-                    ? t('codex.localAccess.collapseDetails', '收起详情')
-                    : t('codex.localAccess.expandDetails', '展开详情')
-                }
-                aria-label={
-                  showLocalAccessDetails
-                    ? t('codex.localAccess.collapseDetails', '收起详情')
-                    : t('codex.localAccess.expandDetails', '展开详情')
-                }
-              >
-                <ChevronRight
-                  size={16}
-                  className={`codex-local-access-toggle-icon ${
-                    showLocalAccessDetails ? 'is-open' : ''
-                  }`}
-                />
-              </button>
-            )}
-            <button
-              type="button"
-              className="folder-icon-btn codex-local-access-close-btn"
-              onClick={() => void handleHideLocalAccessEntry()}
-              title={t('codex.localAccess.hideEntryAction', '关闭 API 服务入口')}
-              aria-label={t('codex.localAccess.hideEntryAction', '关闭 API 服务入口')}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-
-        {showLocalAccessDetails && (
-          <>
-            <div className="codex-local-access-meta">
-              <div className="codex-local-access-row">
-                <span className="codex-local-access-label">{t('codex.localAccess.baseUrl', '地址')}</span>
-                <code className="codex-local-access-code" title={baseUrl}>{baseUrl || '-'}</code>
-                <div className="codex-local-access-row-actions">
-                  <button
-                    type="button"
-                    className="folder-icon-btn"
-                    onClick={() => void handleCopyLocalAccessValue('baseUrl', baseUrl)}
-                    title={t('common.copy', '复制')}
-                    disabled={!baseUrl}
-                  >
-                    {localAccessCopiedField === 'baseUrl' ? <Check size={14} /> : <Copy size={14} />}
-                  </button>
-                </div>
-              </div>
-              <div className="codex-local-access-row">
-                <span className="codex-local-access-label">{t('codex.localAccess.apiKey', '密钥')}</span>
-                <code className="codex-local-access-code" title={activeLocalAccessApiKey?.key || '-'}>
-                  {apiKeyDisplay}
-                </code>
-                <div className="codex-local-access-row-actions">
-                  <button
-                    type="button"
-                    className="folder-icon-btn"
-                    onClick={() => setLocalAccessKeyVisible((current) => !current)}
-                    title={
-                      localAccessKeyVisible
-                        ? t('codex.localAccess.hideKey', '隐藏密钥')
-                        : t('codex.localAccess.showKey', '显示密钥')
-                    }
-                    disabled={!activeLocalAccessApiKey}
-                  >
-                    {localAccessKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                  <button
-                    type="button"
-                    className="folder-icon-btn"
-                    onClick={() => void handleCopyLocalAccessValue(
-                      'apiKey',
-                      activeLocalAccessApiKey?.key || '',
-                    )}
-                    title={t('common.copy', '复制')}
-                    disabled={!activeLocalAccessApiKey}
-                  >
-                    {localAccessCopiedField === 'apiKey' ? <Check size={14} /> : <Copy size={14} />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="folder-inline-preview codex-local-access-preview">
-              {showLocalAccessEmptyState ? (
-                <div className="codex-local-access-empty-state">
-                  <span className="codex-local-access-empty-text">{localAccessEmptyMessage}</span>
-                  <button
-                    type="button"
-                    className="codex-local-access-empty-action"
-                    onClick={openLocalAccessMemberPicker}
-                    title={t('common.shared.addAccount', '添加账号')}
-                    disabled={localAccessBusy}
-                  >
-                    <FolderPlus size={14} />
-                    <span>{t('common.shared.addAccount', '添加账号')}</span>
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {previewAccounts.map((account) => {
-                    const presentation = resolvePresentation(account);
-                    const hourlyQuota = presentation.quotaItems.find((item) => item.key === 'primary');
-                    const weeklyQuota = presentation.quotaItems.find((item) => item.key === 'secondary');
-                    return (
-                      <div key={`local-access-${account.id}`} className="folder-preview-item codex-local-access-member">
-                        <span
-                          className="folder-preview-email codex-local-access-member-email"
-                          title={maskAccountText(presentation.displayName)}
-                        >
-                          {maskAccountText(presentation.displayName)}
-                        </span>
-                        <span
-                          className={`codex-local-access-member-text codex-local-access-member-quota ${hourlyQuota?.quotaClass || 'unknown'}`}
-                          title={hourlyQuota?.hintText || hourlyQuota?.label}
-                        >
-                          {hourlyQuota?.valueText || '-'}
-                        </span>
-                        <span
-                          className={`codex-local-access-member-text codex-local-access-member-quota ${weeklyQuota?.quotaClass || 'unknown'}`}
-                          title={weeklyQuota?.label}
-                        >
-                          {weeklyQuota?.valueText || '-'}
-                        </span>
-                        <span className={`codex-local-access-member-plan tier-badge ${presentation.planClass || 'unknown'}`}>
-                          {presentation.planLabel}
-                        </span>
-                        <button
-                          type="button"
-                          className="folder-preview-remove-btn"
-                          onClick={() => void handleRemoveLocalAccessAccount(account.id)}
-                          title={t('accounts.groups.removeFromGroup')}
-                          aria-label={`${t('accounts.groups.removeFromGroup')}: ${maskAccountText(presentation.displayName)}`}
-                          disabled={localAccessBusy}
-                        >
-                          <LogOut size={12} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {hiddenCount > 0 && (
-                    <button
-                      type="button"
-                      className="folder-preview-item more"
-                      onClick={openLocalAccessMemberPicker}
-                      title={t('codex.localAccess.modal.manageMembers', '管理成员')}
-                      aria-label={t('codex.localAccess.modal.manageMembers', '管理成员')}
-                    >
-                      +{hiddenCount}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-
-            {localAccessQuotaPreviewItems.length > 0 && (
-              <div
-                className="codex-local-access-pool-row"
-                aria-label={localAccessQuotaPoolLabels.title}
-              >
-                {localAccessQuotaPreviewItems.map((item) => (
-                  <div key={item.key} className="codex-local-access-pool-pill">
-                    <strong>{item.key} ({item.count})</strong>
-                    <span>
-                      {localAccessQuotaPoolLabels.hourly} {formatCodexQuotaPoolPercent(item.hourly)}
-                    </span>
-                    <span>
-                      {localAccessQuotaPoolLabels.weekly} {formatCodexQuotaPoolPercent(item.weekly)}
-                    </span>
-                  </div>
-                ))}
-                {localAccessQuotaHiddenCount > 0 && (
-                  <button
-                    type="button"
-                    className="codex-local-access-pool-more"
-                    onClick={() => setShowLocalAccessQuotaStatsModal(true)}
-                    title={t('codex.localAccess.quotaPool.viewFull', '查看完整统计')}
-                    aria-label={t('codex.localAccess.quotaPool.viewFull', '查看完整统计')}
-                  >
-                    +{localAccessQuotaHiddenCount}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {localAccessState?.lastError && (
-              <div className="quota-error-inline">
-                <CircleAlert size={14} />
-                <span>{localAccessState.lastError}</span>
-                <button
-                  type="button"
-                  className="folder-icon-btn codex-local-access-error-action"
-                  onClick={() => void handleKillLocalAccessPort()}
-                  title={t('codex.localAccess.killPortAction', '清理端口')}
-                  aria-label={t('codex.localAccess.killPortAction', '清理端口')}
-                  disabled={localAccessBusy || !localAccessCollection}
-                >
-                  {localAccessPortKilling ? (
-                    <RefreshCw size={14} className="loading-spinner" />
-                  ) : (
-                    <Wrench size={14} />
-                  )}
-                </button>
-              </div>
-            )}
-
-            <div className="codex-card-bottom codex-local-access-card-bottom">
-              <span className="card-date">
-                {t('codex.localAccess.footerHint', '监听本机与局域网')}
-              </span>
-              <div className="card-footer codex-local-access-footer">
-                <div className="card-actions">
-                  <button
-                    className="card-action-btn"
-                    onClick={openLocalAccessMemberPicker}
-                    title={t('common.shared.addAccount', '添加账号')}
-                    disabled={localAccessBusy}
-                  >
-                    <FolderPlus size={14} />
-                  </button>
-                  <button
-                    className="card-action-btn"
-                    onClick={openLocalAccessPanel}
-                    title={t('codex.localAccess.dashboardAction', '服务面板')}
-                    disabled={localAccessBusy}
-                  >
-                    <Database size={14} />
-                  </button>
-                  <button
-                    className="card-action-btn"
-                    onClick={() => void handleQuickRefreshLocalAccessQuota()}
-                    title={t('common.shared.refreshQuota', '刷新配额')}
-                    disabled={localAccessBusy || !localAccessCollection}
-                  >
-                    <RotateCw size={14} className={localAccessRefreshing ? 'loading-spinner' : ''} />
-                  </button>
-                  <button
-                    className="card-action-btn success"
-                    onClick={() => void handleQuickActivateLocalAccess()}
-                    title={t('codex.localAccess.activateAction', '启动 API 服务')}
-                    disabled={localAccessBusy || !localAccessCollection}
-                  >
-                    {localAccessStarting ? <RefreshCw size={14} className="loading-spinner" /> : <Play size={14} />}
-                  </button>
-                  <button
-                    className={`card-action-btn ${localAccessCollection?.enabled ? '' : 'success'}`}
-                    onClick={() => void handleQuickToggleLocalAccessEnabled()}
-                    title={localAccessCollection?.enabled
-                      ? t('codex.localAccess.disableService', '停用服务')
-                      : t('codex.localAccess.enableService', '启用服务')}
-                    disabled={localAccessBusy || !localAccessCollection}
-                  >
-                    <Power size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      <CodexLocalAccessServicesPanel
+        key="codex-local-access-overview"
+        state={localAccessState}
+        launchCurrent={localAccessLaunchCurrent}
+        actionBusy={localAccessBusy}
+        refreshing={localAccessRefreshing}
+        starting={localAccessStarting}
+        variant="overview"
+        onCreateService={handleCreateLocalAccessService}
+        onRefresh={reloadLocalAccessState}
+        onSelectService={handleSelectLocalAccessService}
+        onRenameService={handleRenameLocalAccessService}
+        onDeleteService={handleDeleteLocalAccessService}
+        onToggleServiceEnabled={handleToggleLocalAccessServiceEnabled}
+        onActivateService={handleQuickActivateLocalAccessService}
+        onManageService={openLocalAccessPanelForService}
+        onConfigureUpstreams={openLocalAccessMemberPickerForService}
+        onHideEntry={handleHideLocalAccessEntry}
+      />
     );
   };
 
   const renderInlineFolderCards = () => {
     const cards: ReactElement[] = [];
-    const localAccessCard = renderLocalAccessInlineCard();
-    if (localAccessCard) {
-      cards.push(localAccessCard);
-    }
 
     if (!activeGroupId && !groupByTag) {
       cards.push(...codexGroups.map((group) => {
@@ -4864,8 +4599,10 @@ export function CodexAccountsPage() {
     return rows.length > 0 ? rows : null;
   };
 
+  const localAccessServiceSection = renderLocalAccessServiceSection();
   const inlineFolderCards = renderInlineFolderCards();
   const hasGroupEntryCards = Boolean(inlineFolderCards && inlineFolderCards.length > 0);
+  const hasLocalAccessServiceSection = Boolean(localAccessServiceSection);
   const showOverviewSelectionBar =
     !groupByTag && !activeGroupId && paginatedAccounts.length > 0;
   const externalImportRunning = [
@@ -5186,17 +4923,18 @@ export function CodexAccountsPage() {
 
         {loading && accounts.length === 0 ? (
           <div className="loading-container"><RefreshCw size={24} className="loading-spinner" /><p>{t('common.loading', '加载中...')}</p></div>
-        ) : accounts.length === 0 && !hasGroupEntryCards ? (
+        ) : accounts.length === 0 && !hasGroupEntryCards && !hasLocalAccessServiceSection ? (
           <div className="empty-state"><Globe size={48} /><h3>{t('common.shared.empty.title', '暂无账号')}</h3><p>{t('codex.empty.description', '点击"添加账号"开始管理您的 Codex 账号')}</p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '16px' }}>
               <button className="btn btn-primary" onClick={() => openAddModal('oauth')}><Plus size={16} />{t('common.shared.addAccount', '添加账号')}</button>
               <button className="btn btn-secondary" onClick={() => window.dispatchEvent(new CustomEvent('app-request-navigate', { detail: 'manual' }))}><BookOpen size={16} />{t('manual.navTitle', '功能使用手册')}</button>
             </div>
           </div>
-        ) : filteredAccounts.length === 0 && !hasGroupEntryCards ? (
+        ) : filteredAccounts.length === 0 && !hasGroupEntryCards && !hasLocalAccessServiceSection ? (
           <div className="empty-state"><h3>{t('common.shared.noMatch.title', '没有匹配的账号')}</h3><p>{t('common.shared.noMatch.desc', '请尝试调整搜索或筛选条件')}</p></div>
         ) : (
           <>
+            {localAccessServiceSection}
             {showOverviewSelectionBar && (
               <div className="codex-overview-selection-bar">
                 <label className="codex-overview-select-all">
@@ -5262,7 +5000,7 @@ export function CodexAccountsPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="codex-accounts-grid">{inlineFolderCards}{renderGridCards(paginatedAccounts)}</div>
+                  <div className="codex-accounts-grid">{renderGridCards(paginatedAccounts)}</div>
                 )}
               </div>
             ) : groupByTag ? (
@@ -6417,6 +6155,7 @@ export function CodexAccountsPage() {
           initialSelectedIds={localAccessModalSelectedIds}
           maskAccountText={maskAccountText}
           onClose={() => setShowLocalAccessModal(false)}
+          onOpenServiceInstances={openLocalAccessServiceInstances}
           onSaveAccounts={({ accountIds, restrictFreeAccounts }) =>
             handleSaveLocalAccessAccounts(accountIds, { restrictFreeAccounts })
           }
@@ -6432,10 +6171,29 @@ export function CodexAccountsPage() {
           onKillPort={handleKillLocalAccessPort}
           onToggleEnabled={handleToggleLocalAccessEnabled}
           onTest={handleTestLocalAccess}
+          onTestUpstream={handleTestLocalAccessUpstream}
           saving={localAccessSaving}
           testing={localAccessTesting}
           starting={localAccessStarting}
           portCleanupBusy={localAccessPortKilling}
+        />
+
+        <CodexLocalAccessServiceInstancesModal
+          isOpen={showLocalAccessServiceInstancesModal}
+          state={localAccessState}
+          onClose={() => setShowLocalAccessServiceInstancesModal(false)}
+          onCreateService={handleCreateLocalAccessService}
+          onRenameService={handleRenameLocalAccessService}
+          onDeleteService={handleDeleteLocalAccessService}
+          onSelectService={handleSelectLocalAccessService}
+          onToggleServiceEnabled={handleToggleLocalAccessServiceEnabled}
+          onActivateService={handleQuickActivateLocalAccessService}
+          onManageService={openLocalAccessPanelForService}
+          onConfigureUpstreams={openLocalAccessMemberPickerForService}
+          onRefresh={reloadLocalAccessState}
+          saving={localAccessSaving}
+          refreshing={localAccessRefreshing}
+          starting={localAccessStarting}
         />
 
         {/* Codex 分组管理弹窗 */}
