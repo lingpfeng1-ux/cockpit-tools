@@ -996,7 +996,12 @@
       },
       "errors": {
         "notEnabled": "請先啟用 WebDAV 同步"
-      }
+      },
+      "retentionTitle": "雲端保留天數",
+      "retentionDesc": "雲端超過天數的備份會在下次同步時自動清理。",
+      "retentionUnit": "天",
+      "collapseAll": "收起遠端備份",
+      "expandAll": "展開全部遠端備份 (還有 {{count}} 個)"
     }
   },
   "appPath": {

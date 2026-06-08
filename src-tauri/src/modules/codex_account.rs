@@ -4105,7 +4105,7 @@ fn import_account_struct(account: CodexAccount) -> Result<CodexAccount, String> 
     if account.is_api_key_auth() || account.openai_api_key.is_some() {
         let api_key = normalize_optional_ref(account.openai_api_key.as_deref())
             .ok_or("API Key 账号缺少 OPENAI_API_KEY")?;
-        return upsert_api_key_account(
+        let mut api_acc = upsert_api_key_account(
             api_key,
             account.api_base_url.clone(),
             Some(account.api_provider_mode),
@@ -4117,15 +4117,40 @@ fn import_account_struct(account: CodexAccount) -> Result<CodexAccount, String> 
             account.api_model_vision_support.clone(),
             account.api_vision_routing_model.clone(),
             account.account_name.clone(),
-        );
+        )?;
+        let mut changed = false;
+        if let Some(tags) = account.tags {
+            api_acc.tags = Some(tags);
+            changed = true;
+        }
+        if let Some(note) = account.account_note {
+            api_acc.account_note = Some(note);
+            changed = true;
+        }
+        if changed {
+            save_account(&api_acc)?;
+        }
+        return Ok(api_acc);
     }
 
     let imported_auth_file_plan_type =
         normalize_auth_file_plan_type(account.auth_file_plan_type.as_deref());
     let mut imported = upsert_account(account.tokens)?;
-    if apply_auth_file_plan_type(&mut imported, imported_auth_file_plan_type) {
+    let mut changed = apply_auth_file_plan_type(&mut imported, imported_auth_file_plan_type);
+
+    if let Some(tags) = account.tags {
+        imported.tags = Some(tags);
+        changed = true;
+    }
+    if let Some(note) = account.account_note {
+        imported.account_note = Some(note);
+        changed = true;
+    }
+
+    if changed {
         save_account(&imported)?;
     }
+
     Ok(imported)
 }
 

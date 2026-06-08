@@ -850,6 +850,9 @@
       "clearPassword": "清除",
       "remoteDirTitle": "远端目录",
       "remoteDirDesc": "只管理该目录下的 Cockpit 备份文件。",
+      "retentionTitle": "云端保留天数",
+      "retentionDesc": "云端超过天数的备份会在下次同步时自动清理。",
+      "retentionUnit": "天",
       "statusTitle": "同步状态",
       "statusDesc": "远端恢复需要手动选择备份，不会静默覆盖本地数据。",
       "lastUpload": "最近上传：{{time}}",
@@ -867,6 +870,8 @@
       "restoreAction": "恢复",
       "restoreConfirm": "确认从远端备份 {{name}} 恢复数据？",
       "deleteConfirm": "确认删除远端备份 {{name}}？",
+      "collapseAll": "收起远端备份",
+      "expandAll": "展开全部远端备份 (还有 {{count}} 个)",
       "feedback": {
         "testingAndSaving": "正在保存并测试 WebDAV 连接...",
         "saveAndTestSuccess": "配置已保存，连接测试成功！",

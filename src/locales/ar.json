@@ -1042,7 +1042,12 @@
       },
       "errors": {
         "notEnabled": "يرجى تمكين مزامنة WebDAV أولاً"
-      }
+      },
+      "retentionTitle": "Remote Retention Days",
+      "retentionDesc": "Backups older than this on the cloud will be removed during the next sync.",
+      "retentionUnit": "days",
+      "collapseAll": "Collapse remote backups",
+      "expandAll": "Expand all remote backups ({{count}} more)"
     }
   },
   "appPath": {
