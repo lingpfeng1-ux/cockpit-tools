@@ -14,7 +14,7 @@
     "ctaUrl": "https://xiangzili.xyz/user/index/shop",
     "targetVersions": "*",
     "targetLanguages": [
-      "*"
+      "zh"
     ],
     "createdAt": "2026-04-07T12:00:00Z",
     "expiresAt": null,
@@ -39,7 +39,7 @@
       "ctaLabel": "选购",
       "ctaUrl": "https://xiangzili.xyz/user/index/shop",
       "targetLanguages": [
-        "*"
+        "zh"
       ],
       "createdAt": "2026-04-07T12:00:00Z",
       "expiresAt": null,
