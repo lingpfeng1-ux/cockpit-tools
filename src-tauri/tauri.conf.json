@@ -78,7 +78,7 @@
       "../src/assets/icons/workbuddy.png": "native-menu-icons/workbuddy.png",
       "../src/assets/icons/zed.png": "native-menu-icons/zed.png",
       "../scripts/claude-desktop-auth-helper.cjs": "scripts/claude-desktop-auth-helper.cjs",
-      "../node_modules/electron/dist": "electron"
+      "resources/electron": "electron"
     },
     "macOS": {
       "bundleName": "Cockpit Tools",
