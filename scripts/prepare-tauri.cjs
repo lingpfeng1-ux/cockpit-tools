@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '..');
 const electronResourceDir = path.join(repoRoot, 'src-tauri', 'resources', 'electron');
+const electronResourceGitkeep = path.join(electronResourceDir, '.gitkeep');
 
 function pathExists(value) {
   try {
@@ -53,6 +54,7 @@ function prepareClaudeDesktopAuthElectron() {
   fs.mkdirSync(electronResourceDir, { recursive: true });
   const source = findElectronDist();
   if (!source) {
+    fs.writeFileSync(electronResourceGitkeep, '\n');
     console.warn(
       '[prepare-tauri] Electron runtime not found. Claude Desktop login helper will be unavailable until npm install downloads electron.'
     );
@@ -66,6 +68,7 @@ function prepareClaudeDesktopAuthElectron() {
     force: true,
     errorOnExist: false,
   });
+  fs.writeFileSync(electronResourceGitkeep, '\n');
   console.log(`[prepare-tauri] Prepared Claude Desktop auth Electron runtime: ${source}`);
 }
 
