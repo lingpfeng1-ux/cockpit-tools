@@ -7,6 +7,17 @@ All notable changes to Cockpit Tools will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
+## [0.26.1] - 2026-06-18
+
+### Added
+- **Kiro local API service (kiro-proxy integration)**: New KiroApiServicePage lets users start/stop a local kiro-proxy Node.js sidecar that exposes Kiro's Claude models as OpenAI/Anthropic-compatible HTTP endpoints. Includes config (port, API key, HTTPS proxy), runtime status, official quota display from Kiro runtime API, usage statistics, model connectivity test, and Claude Code integration snippet.
+- **Auto-import local Kiro account**: Kiro accounts page now auto-imports from `~/.aws/sso/cache/kiro-auth-token.json` on first visit when no accounts exist.
+- **Quota sync via kiro-proxy**: When kiro-proxy is running, account quota is fetched from the official Kiro API through the proxy, clearing "quota query failed" badges without requiring direct network access to AWS endpoints.
+
+### Fixed
+- **Vite watcher crash on Windows**: Added `target/` and `sidecars/` to Vite's watch ignore list to prevent `EISDIR` / `UNKNOWN` lstat errors during concurrent Cargo builds.
+
+---
 ## [0.26.0] - 2026-06-18
 
 ### Added

@@ -7,6 +7,17 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ---
+## [0.26.1] - 2026-06-18
+
+### 新增
+- **Kiro 本地 API 服务（kiro-proxy 集成）**：新增 KiroApiServicePage，可启停本地 kiro-proxy Node.js 边车，将 Kiro 订阅的 Claude 模型暴露为 OpenAI/Anthropic 兼容 HTTP 接口。支持端口/密钥/代理配置、运行状态展示、官方配额查询、积分统计、模型联通测试及 Claude Code 集成示例。
+- **自动导入本地 Kiro 账号**：Kiro 账号页在首次访问时，如果本地存在 `~/.aws/sso/cache/kiro-auth-token.json` 且账号列表为空，会自动导入。
+- **通过 kiro-proxy 同步配额**：当 kiro-proxy 运行时，通过代理调用 Kiro 官方配额 API，自动更新账号配额信息并清除"配额查询失败"标签。
+
+### 修复
+- **Windows 下 Vite 监听器崩溃**：在 Vite watch 忽略列表中添加 `target/` 和 `sidecars/`，防止 Cargo 编译期间 lstat 报错导致开发服务器崩溃。
+
+---
 ## [0.26.0] - 2026-06-18
 
 ### 新增
