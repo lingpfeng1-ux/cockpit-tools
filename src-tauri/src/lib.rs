@@ -698,6 +698,18 @@ pub fn run() {
             commands::kiro::update_kiro_account_tags,
             commands::kiro::get_kiro_accounts_index_path,
             commands::kiro::inject_kiro_to_vscode,
+            // Kiro Proxy (kiro-proxy node sidecar)
+            commands::kiro_proxy::kiro_proxy_check_node,
+            commands::kiro_proxy::kiro_proxy_get_status,
+            commands::kiro_proxy::kiro_proxy_install_dependencies,
+            commands::kiro_proxy::kiro_proxy_start,
+            commands::kiro_proxy::kiro_proxy_stop,
+            commands::kiro_proxy::kiro_proxy_get_health,
+            commands::kiro_proxy::kiro_proxy_get_credits,
+            commands::kiro_proxy::kiro_proxy_list_models,
+            commands::kiro_proxy::kiro_proxy_get_quota,
+            commands::kiro_proxy::kiro_proxy_update_account_quota,
+            commands::kiro_proxy::kiro_proxy_test_model,
             // CodeBuddy Commands
             commands::codebuddy::list_codebuddy_accounts,
             commands::codebuddy::delete_codebuddy_account,

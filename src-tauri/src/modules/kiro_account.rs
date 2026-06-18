@@ -307,6 +307,31 @@ fn persist_quota_query_error(account_id: &str, message: &str) {
     let _ = upsert_account_record(account);
 }
 
+/// 用外部数据(如 kiro-proxy /quota)更新账号配额,清除 quota_query_last_error
+pub fn update_account_quota_from_proxy(
+    account_id: &str,
+    plan_name: Option<String>,
+    plan_tier: Option<String>,
+    credits_total: Option<f64>,
+    credits_used: Option<f64>,
+    bonus_total: Option<f64>,
+    bonus_used: Option<f64>,
+    usage_reset_at: Option<i64>,
+) -> Result<KiroAccount, String> {
+    let mut account = load_account(account_id)
+        .ok_or_else(|| format!("Kiro account not found: {}", account_id))?;
+    if let Some(v) = plan_name { account.plan_name = Some(v); }
+    if let Some(v) = plan_tier { account.plan_tier = Some(v); }
+    if let Some(v) = credits_total { account.credits_total = Some(v); }
+    if let Some(v) = credits_used { account.credits_used = Some(v); }
+    if let Some(v) = bonus_total { account.bonus_total = Some(v); }
+    if let Some(v) = bonus_used { account.bonus_used = Some(v); }
+    if let Some(v) = usage_reset_at { account.usage_reset_at = Some(v); }
+    account.quota_query_last_error = None;
+    account.quota_query_last_error_at = None;
+    upsert_account_record(account)
+}
+
 fn normalize_non_empty(value: Option<&str>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim();

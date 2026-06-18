@@ -1,0 +1,31 @@
+{
+  "name": "@colin3191/kiro-proxy",
+  "version": "0.2.4",
+  "description": "Kiro API proxy with OpenAI and Anthropic compatible endpoints",
+  "type": "module",
+  "bin": {
+    "kiro-proxy": "./server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "server.js",
+    "q-client.js",
+    "token-reader.js",
+    "token-counter.js",
+    "usage-tracker.js",
+    "logger.js",
+    "proxy-config.js"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Colin3191/kiro-proxy.git"
+  },
+  "dependencies": {
+    "@aws/codewhisperer-streaming-client": "^1.0.34",
+    "express": "^4.21.0",
+    "https-proxy-agent": "^7.0.0",
+    "undici": "^6.19.0"
+  }
+}

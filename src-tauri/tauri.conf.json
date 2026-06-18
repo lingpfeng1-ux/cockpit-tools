@@ -78,7 +78,15 @@
       "../src/assets/icons/trae.png": "native-menu-icons/trae.png",
       "../src/assets/icons/windsurf.svg": "native-menu-icons/windsurf.svg",
       "../src/assets/icons/workbuddy.png": "native-menu-icons/workbuddy.png",
-      "../src/assets/icons/zed.png": "native-menu-icons/zed.png"
+      "../src/assets/icons/zed.png": "native-menu-icons/zed.png",
+      "../sidecars/kiro-proxy/server.js": "sidecars/kiro-proxy/server.js",
+      "../sidecars/kiro-proxy/q-client.js": "sidecars/kiro-proxy/q-client.js",
+      "../sidecars/kiro-proxy/token-reader.js": "sidecars/kiro-proxy/token-reader.js",
+      "../sidecars/kiro-proxy/token-counter.js": "sidecars/kiro-proxy/token-counter.js",
+      "../sidecars/kiro-proxy/usage-tracker.js": "sidecars/kiro-proxy/usage-tracker.js",
+      "../sidecars/kiro-proxy/logger.js": "sidecars/kiro-proxy/logger.js",
+      "../sidecars/kiro-proxy/proxy-config.js": "sidecars/kiro-proxy/proxy-config.js",
+      "../sidecars/kiro-proxy/package.json": "sidecars/kiro-proxy/package.json"
     },
     "macOS": {
       "bundleName": "Cockpit Tools",

@@ -7,6 +7,7 @@ export type Page =
   | 'claude'
   | 'claude-cli'
   | 'codex-api-service'
+  | 'kiro-api-service'
   | 'zed'
   | 'github-copilot'
   | 'windsurf'

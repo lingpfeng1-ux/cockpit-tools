@@ -52,6 +52,7 @@ pub mod instance_store;
 pub mod kiro_account;
 pub mod kiro_instance;
 pub mod kiro_oauth;
+pub mod kiro_proxy;
 pub mod linux_updater;
 pub mod logger;
 pub mod macos_native_menu;

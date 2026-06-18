@@ -1,0 +1,308 @@
+.kiro-api-service-page {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.kiro-api-service-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 32px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.kiro-api-service-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 22px;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.kiro-api-service-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.kiro-api-service-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.kiro-api-service-title-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+}
+
+.kiro-api-service-title-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.kiro-api-service-title-copy h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.kiro-api-service-title-line {
+  display: block;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.kiro-api-service-pill-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kiro-api-service-status,
+.kiro-api-service-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+}
+
+.kiro-api-service-status.running,
+.kiro-api-service-pill.success {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.kiro-api-service-status.stopped,
+.kiro-api-service-pill.muted {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--color-text-muted);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+.kiro-api-service-pill.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.kiro-api-service-hero-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kiro-api-service-message {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.kiro-api-service-message.error {
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.kiro-api-service-panel {
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.kiro-api-service-panel h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kiro-api-service-panel h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 0;
+}
+
+.kiro-api-service-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kiro-api-service-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.kiro-api-service-config-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.kiro-api-service-config-grid input {
+  padding: 8px 10px;
+  background: var(--color-input-bg, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.kiro-api-service-config-grid input:disabled {
+  opacity: 0.6;
+}
+
+.kiro-api-service-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.kiro-api-service-summary-card {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kiro-api-service-summary-card span {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.kiro-api-service-summary-card strong {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.kiro-api-service-summary-card small {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.kiro-api-service-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.kiro-api-service-table th,
+.kiro-api-service-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.kiro-api-service-segmented {
+  display: inline-flex;
+  background: rgba(148, 163, 184, 0.1);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.kiro-api-service-segmented button {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.kiro-api-service-segmented button.active {
+  background: var(--color-card-bg);
+  color: var(--color-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.kiro-api-service-endpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
+}
+
+.kiro-api-service-endpoint-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.kiro-api-service-endpoint-card code {
+  flex: 1;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.kiro-api-service-endpoint-card span {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.kiro-api-service-code {
+  position: relative;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.kiro-api-service-code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.kiro-api-service-note {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}

@@ -25,6 +25,7 @@ import {
   EyeOff,
   Lock,
   BookOpen,
+  Activity,
 } from 'lucide-react';
 import { useKiroAccountStore } from '../stores/useKiroAccountStore';
 import * as kiroService from '../services/kiroService';
@@ -165,6 +166,49 @@ export function KiroAccountsPage() {
     }
     writeAccountsOverviewFilterField(filterPersistenceScope, FILTER_TYPES_FIELD, filterTypes);
   }, [filterPersistenceEnabled, filterPersistenceScope, filterTypes]);
+
+  // 自动导入本地 Kiro 账号(仅在账号列表为空 + 未 loading 时触发一次)
+  const autoImportAttempted = useState(false);
+  useEffect(() => {
+    if (autoImportAttempted[0] || store.loading || store.accounts.length > 0) return;
+    autoImportAttempted[1](true);
+    kiroService.importKiroFromLocal().then((imported) => {
+      if (imported && imported.length > 0) {
+        store.fetchAccounts();
+      }
+    }).catch(() => {});
+  }, [store.loading, store.accounts.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 如果 kiro-proxy 在跑,用 /quota 接口更新账号配额(避免原生 runtime API 查询失败)
+  const quotaSyncAttempted = useState(false);
+  useEffect(() => {
+    if (quotaSyncAttempted[0] || store.loading || store.accounts.length === 0) return;
+    quotaSyncAttempted[1](true);
+    import('../services/kiroProxyService').then(async ({ getKiroProxyStatus, getKiroProxyQuota }) => {
+      try {
+        const status = await getKiroProxyStatus();
+        if (!status.running) return;
+        const quota = await getKiroProxyQuota();
+        if (quota.creditsTotal == null && quota.creditsUsed == null) return;
+        const account = store.accounts[0];
+        if (!account) return;
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('kiro_proxy_update_account_quota', {
+          accountId: account.id,
+          planName: quota.planName ?? null,
+          planTier: quota.planTier ?? null,
+          creditsTotal: quota.creditsTotal ?? null,
+          creditsUsed: quota.creditsUsed ?? null,
+          bonusTotal: quota.bonusTotal ?? null,
+          bonusUsed: quota.bonusUsed ?? null,
+          usageResetAt: quota.usageResetAt ? Math.floor(new Date(quota.usageResetAt).getTime() / 1000) : null,
+        });
+        store.fetchAccounts();
+      } catch {
+        // silently ignore
+      }
+    });
+  }, [store.loading, store.accounts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleFilterTypeValue = useCallback((value: string) => {
     setFilterTypes((prev) => {
@@ -886,6 +930,16 @@ export function KiroAccountsPage() {
             <button className={`view-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} title={t('common.shared.view.list', '列表视图')}><List size={16} /></button>
             <button className={`view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title={t('common.shared.view.grid', '卡片视图')}><LayoutGrid size={16} /></button>
           </div>
+
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => window.dispatchEvent(new CustomEvent('app-request-navigate', { detail: 'kiro-api-service' }))}
+            title={t('kiroApiService.title', 'Kiro 本地 API 服务')}
+          >
+            <Activity size={14} />
+            <span>{t('kiroApiService.entry', 'API 服务')}</span>
+          </button>
 
           <MultiSelectFilterDropdown
             options={tierFilterOptions}

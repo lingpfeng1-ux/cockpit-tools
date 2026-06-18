@@ -67,6 +67,7 @@ const PAGE_PLATFORM_MAP: Partial<Record<Page, PlatformId>> = {
   'github-copilot': 'github-copilot',
   windsurf: 'windsurf',
   kiro: 'kiro',
+  'kiro-api-service': 'kiro',
   cursor: 'cursor',
   gemini: 'gemini',
   codebuddy: 'codebuddy',

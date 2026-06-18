@@ -93,6 +93,9 @@ const WindsurfAccountsPage = lazy(() =>
 const KiroAccountsPage = lazy(() =>
   import('./pages/KiroAccountsPage').then((module) => ({ default: module.KiroAccountsPage })),
 );
+const KiroApiServicePage = lazy(() =>
+  import('./pages/KiroApiServicePage').then((module) => ({ default: module.KiroApiServicePage })),
+);
 const CursorAccountsPage = lazy(() =>
   import('./pages/CursorAccountsPage').then((module) => ({ default: module.CursorAccountsPage })),
 );
@@ -2906,6 +2909,7 @@ function MainApp() {
             case 'api-relay':
             case 'codex':
             case 'codex-api-service':
+            case 'kiro-api-service':
             case 'claude':
             case 'claude-cli':
             case 'github-copilot':
@@ -3326,6 +3330,7 @@ function MainApp() {
           {page === 'github-copilot' && <GitHubCopilotAccountsPage />}
           {page === 'windsurf' && <WindsurfAccountsPage />}
           {page === 'kiro' && <KiroAccountsPage />}
+          {page === 'kiro-api-service' && <KiroApiServicePage />}
           {page === 'cursor' && <CursorAccountsPage />}
           {page === 'gemini' && <GeminiAccountsPage />}
           {page === 'codebuddy' && <CodebuddyAccountsPage />}
